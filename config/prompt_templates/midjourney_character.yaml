@@ -1,0 +1,28 @@
+id: midjourney_character_tpose
+provider: midjourney
+description: Front orthographic T-pose character sheet for Meshy image-to-3D
+template: |
+  {identity}, full body T-pose, front view, orthographic character sheet, symmetrical design,
+  arms straight out horizontally, legs slightly apart, clean silhouette, neutral expression,
+  game-ready character concept art, {style}, plain {background} background, no weapons, no props,
+  no text, no watermark --ar {aspect} --style raw --v {version} --no {negatives}
+defaults:
+  style: "Pixar-meets-Zelda style"
+  background: white
+  aspect: "2:3"
+  version: "6.1"
+  negatives: "action pose, running, jumping, sitting, crouching, crossed arms, weapon, sword, staff, shield, cape covering body, cropped feet, cropped hands, background scene, text, logo, watermark"
+fields:
+  - identity
+  - style
+  - background
+  - aspect
+  - version
+  - negatives
+
+examples:
+  - identity: "stylized fantasy swamp ranger"
+    style: "Pixar-meets-Zelda style"
+  - identity: "cyberpunk street courier NPC"
+    style: "game-ready character concept, high resolution"
+    background: gray

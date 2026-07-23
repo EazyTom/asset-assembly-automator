@@ -1,0 +1,92 @@
+app:
+  name: Asset Assembly Automator
+  version: "0.1.0"
+
+paths:
+  app_data: "%LOCALAPPDATA%/AssetAssemblyAutomator"
+  user_config: "%USERPROFILE%/.asset_assembly_automator/config.yaml"
+  secrets: "%USERPROFILE%/.asset_assembly_automator/secrets.env"
+
+meshy:
+  base_url: "https://api.meshy.ai"
+  ai_model: latest
+  model_type: standard
+  smart_topology: auto
+  i2d_target_formats: [fbx, glb]
+  pose_mode: t-pose
+  topology: quad
+  enable_pbr: true
+  should_texture: true
+  hd_texture: true
+  should_remesh: false
+  target_polycount: 300000
+  target_formats: [fbx]
+  image_enhancement: true
+  remove_lighting: true
+  rig_height_meters: 1.7
+  hard_rig_face_limit: 300000
+  # Meshy API max polycount is 300,000 (premium tier). Remesh targets match i2d so we
+  # preserve full detail instead of decimating to game LODs unless you lower these in user config.
+  i2d_target_polycount:
+    hero: 300000
+    npc: 300000
+    crowd: 300000
+  remesh_target_tris:
+    hero: 300000
+    npc: 300000
+    crowd: 300000
+  animation_fps: 30
+  # Walk/run are free with rig — always downloaded into Source/ with the rig FBX
+  include_basic_animations_in_package: true
+  default_custom_animations:
+    - idle3
+    - idle4
+    - idle12
+  multi_view: false
+  max_concurrent_jobs: 2
+  # Cap image-to-3D upload size (Meshy UI ~20MB; API 100MB). Base64 inflates payload ~37%.
+  i2d_max_image_px: 2048
+  i2d_max_image_mb: 18
+  use_hires_texture_image: false
+
+magnific:
+  base_url: "https://api.magnific.com"
+  mystic_model: super_real
+  resolution: 2k
+  aspect_ratio: portrait_2_3
+  upscale_mode: precision_v2
+  upscale_scale_factor: 2x
+  upscale_flavor: sublime
+  precision_sharpen: 7
+  precision_smart_grain: 7
+  precision_ultra_detail: 30
+
+higgsfield:
+  provider: mcp
+  mcp_url: "https://mcp.higgsfield.ai/mcp"
+  oauth_redirect_uri: "http://localhost:8787/callback"
+  api_base_url: "https://platform.higgsfield.ai"
+  default_image_model: soul_2
+  turnaround_model: nano_banana_pro
+  aspect_ratio: "2:3"
+
+midjourney:
+  watch_folder: ""
+  default_version: "6.1"
+  default_aspect: "2:3"
+
+gui:
+  theme: dark
+  show_getting_started: true
+  show_whats_new: true
+
+watchers:
+  debounce_seconds: 1.5
+  stability_checks: 3
+
+cursor_cli:
+  enabled: true
+  command: cursor-agent
+  model: ""
+  extra_args: []
+  timeout_seconds: 900

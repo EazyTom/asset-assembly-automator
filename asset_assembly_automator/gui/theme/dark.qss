@@ -1,0 +1,16 @@
+/* Asset Assembly Automator dark theme accents */
+QWidget#DashboardCard {
+    background-color: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 8px;
+}
+QLabel#StatusRunning { color: #3B82F6; }
+QLabel#StatusDone { color: #22C55E; }
+QLabel#StatusFailed { color: #EF4444; }
+QLabel#StatusPaused { color: #EAB308; }
+QPushButton#PrimaryButton {
+    background-color: #3B82F6;
+    color: white;
+    border-radius: 6px;
+    padding: 6px 12px;
+}

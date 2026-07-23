@@ -1,0 +1,26 @@
+id: higgsfield_character_tpose
+provider: higgsfield
+description: T-pose character concept for Higgsfield generate_image
+template: |
+  {identity}, full body T-pose, front orthographic view, arms straight out horizontally,
+  legs slightly apart, clean silhouette, game-ready 3D character concept art, {style},
+  plain {background} background, no weapons, no props, no text, no watermark
+defaults:
+  style: "stylized game character"
+  background: white
+  model: soul_2
+  aspect_ratio: "2:3"
+fields:
+  - identity
+  - style
+  - background
+
+meshy_texture_template: |
+  Create a clean game-ready humanoid 3D character from this image. Preserve the character identity,
+  colors, costume, and silhouette. Generate in a standard T-pose suitable for humanoid rigging and
+  Unity import. Keep limbs clearly separated, maintain clean topology, and produce PBR textures.
+  {extra_details}
+
+turnaround_template: |
+  {identity}, character turnaround sheet: front view, 3/4 left view, side view, 3/4 right view,
+  back view, T-pose, orthographic, white background, consistent design, game-ready concept art

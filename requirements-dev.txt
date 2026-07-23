@@ -1,0 +1,11 @@
+# Dev / test / packaging dependencies.
+# Preferred: pip install -e ".[dev]"
+
+-r requirements.txt
+
+pytest>=8.0
+pytest-asyncio>=0.23
+pytest-qt>=4.4
+ruff>=0.3
+mypy>=1.8
+pyinstaller>=6.4
