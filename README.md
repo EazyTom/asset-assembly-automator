@@ -1,5 +1,7 @@
 # Asset Assembly Automator (AAA)
 
+![AAA screenshot](AAA-screenshot.png)
+
 **Version 0.1.0** — Python + PyQt6 orchestrator for the character asset pipeline: concept art (Higgsfield / Magnific / Midjourney) → Meshy image-to-3D → rig + animations → FBX.zip → optional Unity MCP import.
 
 Two GUI entry points share the same SQLite database, stage modules, and provider clients:
