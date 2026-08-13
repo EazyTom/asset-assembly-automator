@@ -36,10 +36,39 @@ class I2dTargetPolycount(BaseSettings):
     crowd: int = 300000
 
 
+class MagnificSettings(BaseSettings):
+    base_url: str = "https://api.magnific.com"
+    mystic_model: str = "super_real"
+    resolution: str = "2k"
+    aspect_ratio: str = "portrait_2_3"
+    upscale_mode: str = "precision_v2"
+    upscale_scale_factor: str = "2x"
+    upscale_flavor: str = "sublime"
+    precision_sharpen: int = 7
+    precision_smart_grain: int = 7
+    precision_ultra_detail: int = 30
+    max_concurrent_jobs: int = 2
+    default_enabled: bool = True
+
+
+class AgentCliSettings(BaseSettings):
+    provider: Literal["cursor", "claude"] = "cursor"
+    claude_command: str = "claude"
+    claude_model: str = ""
+    claude_extra_args: list[str] = Field(default_factory=list)
+
+
+class UnityMcpSettings(BaseSettings):
+    bridge: Literal["anklebreaker", "coplay", "official"] = "anklebreaker"
+
+
 class MeshySettings(BaseSettings):
     base_url: str = "https://api.meshy.ai"
-    ai_model: str = "latest"
+    ai_model: str = "meshy-7"
     model_type: str = "standard"
+    default_preset: Literal["quality", "game_ready"] = "quality"
+    default_texture_resolution: Literal["2k", "4k", "8k"] = "8k"
+    ultra_mode: bool = False
     smart_topology: Literal["auto", "off", "lowpoly"] = "auto"
     i2d_target_formats: list[str] = Field(default_factory=lambda: ["fbx", "glb"])
     pose_mode: str = "t-pose"
@@ -63,22 +92,9 @@ class MeshySettings(BaseSettings):
     )
     multi_view: bool = False
     max_concurrent_jobs: int = 2
-    i2d_max_image_px: int = 2048
+    i2d_max_image_px: int = 4096
     i2d_max_image_mb: int = 18
     use_hires_texture_image: bool = False
-
-
-class MagnificSettings(BaseSettings):
-    base_url: str = "https://api.magnific.com"
-    mystic_model: str = "super_real"
-    resolution: str = "2k"
-    aspect_ratio: str = "portrait_2_3"
-    upscale_mode: str = "precision_v2"
-    upscale_scale_factor: str = "2x"
-    upscale_flavor: str = "sublime"
-    precision_sharpen: int = 7
-    precision_smart_grain: int = 7
-    precision_ultra_detail: int = 30
 
 
 class HiggsfieldSettings(BaseSettings):
@@ -140,7 +156,7 @@ class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AAA_", extra="ignore")
 
     name: str = "Asset Assembly Automator"
-    version: str = "0.1.0"
+    version: str = "0.2.0"
 
 
 class Settings(BaseSettings):
@@ -155,6 +171,8 @@ class Settings(BaseSettings):
     gui: GuiSettings = Field(default_factory=GuiSettings)
     watchers: WatcherSettings = Field(default_factory=WatcherSettings)
     cursor_cli: CursorCliSettings = Field(default_factory=CursorCliSettings)
+    agent_cli: AgentCliSettings = Field(default_factory=AgentCliSettings)
+    unity_mcp: UnityMcpSettings = Field(default_factory=UnityMcpSettings)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

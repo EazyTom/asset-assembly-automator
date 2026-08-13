@@ -117,6 +117,10 @@ class MainWindow(QMainWindow):
             act.triggered.connect(slot)
 
         tools_menu = self.menuBar().addMenu("&Tools")
+        tools_menu.addAction("Logs…", self._show_logs)
+        tools_menu.addAction("Show errors", self._show_errors)
+        tools_menu.addAction("Diagnostics…", self._diagnostics)
+        tools_menu.addSeparator()
         tools_menu.addAction("Reset local database…", self._reset_local_database)
         tools_menu.addAction("Delete output directory…", self._delete_output_directory)
 
@@ -358,6 +362,28 @@ class MainWindow(QMainWindow):
 
     def _toggle_mode(self) -> None:
         self.stack.setCurrentIndex(1 if self.stack.currentIndex() == 0 else 0)
+
+    def _show_logs(self) -> None:
+        self.log_viewer.setFocus()
+        self.log_viewer.level_filter.setCurrentText("All levels")
+        self.log_viewer.search.clear()
+
+    def _show_errors(self) -> None:
+        self.log_viewer.setFocus()
+        self.log_viewer.level_filter.setCurrentText("error")
+        self.log_viewer.search.clear()
+        self.log_viewer.refresh()
+        for row in range(self.log_viewer.table.rowCount() - 1, -1, -1):
+            level_item = self.log_viewer.table.item(row, 1)
+            if level_item and level_item.text().lower() == "error":
+                self.log_viewer.table.selectRow(row)
+                self.log_viewer.table.scrollToItem(level_item)
+                break
+
+    def _diagnostics(self) -> None:
+        from asset_assembly_automator.gui.dialogs.diagnostics_dialog import DiagnosticsDialog
+
+        DiagnosticsDialog(self.db, self).exec()
 
 
 def main() -> int:

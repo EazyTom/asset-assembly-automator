@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import contextvars
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from asset_assembly_automator.core.logging import PipelineLogWriter, configure_l
 from asset_assembly_automator.core.output_paths import (
     get_output_dirs,
 )
+from asset_assembly_automator.core.state_machine import StageId, asset_kind_for_pipeline
 from asset_assembly_automator.workflow.templates import (
     load_unity_cleanup_template,
     load_unity_import_template,
@@ -63,26 +65,55 @@ def get_meshy_client(dry_run: bool = False) -> MeshyClient | FakeMeshyClient:
 
 
 def resolve_i2d_model_type(pipe: Pipeline) -> str:
-    """Map smart_topology config + poly budget to Meshy model_type for i2d."""
-    settings = get_settings()
-    smart = settings.meshy.smart_topology
-    if smart == "lowpoly":
-        return "lowpoly"
-    if smart == "off":
-        return settings.meshy.model_type
-    if pipe.poly_budget in ("npc", "crowd"):
-        return "lowpoly"
-    return settings.meshy.model_type
+    """Map pipeline preset to Meshy model_type for i2d."""
+    preset = pipe.metadata.get("meshy_preset", get_settings().meshy.default_preset)
+    if preset == "game_ready":
+        return "smart-topology"
+    return "standard"
 
 
 def meshy_settings_for_pipeline(pipe: Pipeline) -> dict[str, Any]:
-    """Resolve Meshy API settings for a pipeline, including budget-aware i2d polycount."""
+    """Resolve Meshy API settings for a pipeline, including preset and budget-aware polycount."""
     settings = get_settings()
+    meta = pipe.metadata
+    preset = meta.get("meshy_preset", settings.meshy.default_preset)
     cfg = settings.meshy.model_dump()
-    budget_map = settings.meshy.i2d_target_polycount.model_dump()
-    cfg["target_polycount"] = budget_map.get(pipe.poly_budget, budget_map["hero"])
-    cfg["model_type"] = resolve_i2d_model_type(pipe)
+    kind = asset_kind_for_pipeline(pipe)
+
+    cfg["image_enhancement"] = meta.get("image_enhancement", settings.meshy.image_enhancement)
+    cfg["enable_pbr"] = settings.meshy.enable_pbr
+    cfg["should_texture"] = settings.meshy.should_texture
+    cfg["should_remesh"] = False
     cfg["target_formats"] = list(cfg.get("i2d_target_formats") or ["fbx", "glb"])
+
+    if preset == "game_ready":
+        cfg["model_type"] = "smart-topology"
+        cfg["ai_model"] = "meshy-t2"
+        cfg["target_polycount"] = int(meta.get("smart_topology_polycount", 4000))
+        cfg.pop("topology", None)
+        cfg.pop("hd_texture", None)
+        cfg.pop("texture_resolution", None)
+        cfg.pop("remove_lighting", None)
+        cfg.pop("ultra_mode", None)
+    else:
+        cfg["model_type"] = "standard"
+        cfg["ai_model"] = meta.get("ai_model", settings.meshy.ai_model)
+        cfg["texture_resolution"] = meta.get(
+            "texture_resolution", settings.meshy.default_texture_resolution
+        )
+        cfg.pop("hd_texture", None)
+        budget_map = settings.meshy.i2d_target_polycount.model_dump()
+        cfg["target_polycount"] = budget_map.get(pipe.poly_budget, budget_map["hero"])
+        if meta.get("ultra_mode", settings.meshy.ultra_mode):
+            cfg["ultra_mode"] = True
+        if cfg.get("ai_model") != "meshy-6":
+            cfg.pop("remove_lighting", None)
+
+    if kind == "character":
+        cfg["pose_mode"] = settings.meshy.pose_mode
+    else:
+        cfg.pop("pose_mode", None)
+
     return cfg
 
 
@@ -184,6 +215,7 @@ async def run_stage(
 ) -> StageResult:
     configure_logging(verbose=verbose)
     db = get_db()
+    pipe = db.get_pipeline(pipeline_id)
     ctx = StageContext(
         pipeline_id=pipeline_id,
         dry_run=dry_run,
@@ -192,28 +224,79 @@ async def run_stage(
         extra=dict(kwargs),
     )
     dirs = get_output_dirs(db, pipeline_id)
+    stage_id = db.record_stage(pipeline_id, stage_name, "in_progress")
+
+    def _log_callback(lvl: str, msg: str, extra: dict[str, Any] | None = None) -> None:
+        context = {**(extra or {}), "stage": stage_name}
+        if pipe:
+            context.setdefault("asset_name", pipe.asset_name)
+            context.setdefault("asset_kind", asset_kind_for_pipeline(pipe))
+        db.add_log(pipeline_id, lvl, msg, stage_id=stage_id, context=context)
+
     writer = PipelineLogWriter(
         pipeline_id,
         stage_name,
         output_root=dirs["root"],
-        db_callback=lambda lvl, msg, extra: db.add_log(pipeline_id, lvl, msg, context=extra),
+        db_callback=_log_callback,
     )
-    db.record_stage(pipeline_id, stage_name, "in_progress")
-    writer.log("info", f"Starting stage {stage_name}")
+    started = time.perf_counter()
+    writer.log("info", f"Starting stage {stage_name}", stage_id=stage_id)
     try:
         result: StageResult = await fn(ctx, db, dirs, writer)
+        duration_ms = int((time.perf_counter() - started) * 1000)
         db.record_stage(
             pipeline_id,
             stage_name,
             "completed" if result.success else "failed",
+            stage_row_id=stage_id,
+            duration_ms=duration_ms,
             error_message=result.error,
+            metadata={"stage_id": stage_id},
         )
         if result.next_stage:
             db.update_pipeline_stage(pipeline_id, result.next_stage)
-        writer.log("info" if result.success else "error", result.message)
+        finish_level = "info" if result.success else "error"
+        writer.log(
+            finish_level,
+            result.message,
+            duration_ms=duration_ms,
+            stage_id=stage_id,
+            success=result.success,
+        )
+        if stage_name == StageId.UNITY_IMPORT.value and result.success:
+            from asset_assembly_automator.core.pipeline_timing import rollup_pipeline_timing
+
+            unity_csharp_ms: int | None = None
+            if isinstance(result.data, dict):
+                raw = result.data.get("duration_ms")
+                if raw is not None:
+                    unity_csharp_ms = int(raw)
+            stats = rollup_pipeline_timing(
+                db,
+                pipeline_id,
+                unity_csharp_ms=unity_csharp_ms,
+                trigger="unity_import",
+            )
+            writer.log(
+                "info",
+                "Pipeline timing stats recorded",
+                pipeline_wall_ms=stats.get("pipeline_wall_ms"),
+                meshy_total_ms=stats.get("meshy_total_ms"),
+                unity_stage_ms=stats.get("unity_stage_ms"),
+                stage_total_ms=stats.get("stage_total_ms"),
+            )
         return result
     except Exception as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
         message = format_stage_error(exc)
-        db.record_stage(pipeline_id, stage_name, "failed", error_message=message)
-        writer.log("error", message)
+        db.record_stage(
+            pipeline_id,
+            stage_name,
+            "failed",
+            stage_row_id=stage_id,
+            duration_ms=duration_ms,
+            error_message=message,
+            metadata={"stage_id": stage_id},
+        )
+        writer.log("error", message, duration_ms=duration_ms, stage_id=stage_id)
         return StageResult(success=False, stage=stage_name, error=message, message=message)

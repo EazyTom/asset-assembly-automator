@@ -4,6 +4,11 @@ import asyncio
 import importlib
 from typing import Any
 
+from asset_assembly_automator.core.concurrency import (
+    stage_semaphore,
+    stage_uses_unity_lock,
+    unity_import_lock,
+)
 from asset_assembly_automator.core.db.models import Database, StageResult
 from asset_assembly_automator.core.logging import configure_logging
 from asset_assembly_automator.core.state_machine import MANUAL_GATES, StageId, runnable_stage
@@ -17,7 +22,7 @@ class PipelineRunner:
         *,
         dry_run: bool = False,
         verbose: bool = False,
-        max_concurrent: int = 2,
+        max_concurrent: int = 4,
     ) -> None:
         self.db = db or Database()
         self.dry_run = dry_run
@@ -44,6 +49,37 @@ class PipelineRunner:
         token = bind_db(self.db)
         try:
             async with self.semaphore:
+                provider_sem = stage_semaphore(stage)
+                if provider_sem is not None:
+                    async with provider_sem:
+                        if stage_uses_unity_lock(stage):
+                            lock = unity_import_lock()
+                            if lock.locked():
+                                self._log_queued(pipeline_id, stage)
+                            async with lock:
+                                return await module.run(
+                                    pipeline_id,
+                                    dry_run=self.dry_run,
+                                    verbose=self.verbose,
+                                    **kwargs,
+                                )
+                        return await module.run(
+                            pipeline_id,
+                            dry_run=self.dry_run,
+                            verbose=self.verbose,
+                            **kwargs,
+                        )
+                if stage_uses_unity_lock(stage):
+                    lock = unity_import_lock()
+                    if lock.locked():
+                        self._log_queued(pipeline_id, stage)
+                    async with lock:
+                        return await module.run(
+                            pipeline_id,
+                            dry_run=self.dry_run,
+                            verbose=self.verbose,
+                            **kwargs,
+                        )
                 return await module.run(
                     pipeline_id,
                     dry_run=self.dry_run,
@@ -52,6 +88,14 @@ class PipelineRunner:
                 )
         finally:
             unbind_db(token)
+
+    def _log_queued(self, pipeline_id: int, stage: StageId) -> None:
+        self.db.add_log(
+            pipeline_id,
+            "info",
+            "Queued behind Unity import",
+            context={"stage": stage.value, "reason": "queued_unity_import"},
+        )
 
     async def run_pipeline(
         self,
@@ -67,6 +111,13 @@ class PipelineRunner:
         if not pipe:
             return StageResult(success=False, stage="unknown", error="Pipeline not found")
 
+        self.db.add_log(
+            pipeline_id,
+            "info",
+            "Pipeline run started",
+            context={"stage": pipe.current_stage, "asset_name": pipe.asset_name},
+        )
+
         current = runnable_stage(StageId(pipe.current_stage))
         if StageId(pipe.current_stage) == StageId.DRAFT:
             self.db.update_pipeline_stage(pipeline_id, current.value)
@@ -77,6 +128,12 @@ class PipelineRunner:
             if until and current == until:
                 break
             if current in MANUAL_GATES and auto:
+                self.db.add_log(
+                    pipeline_id,
+                    "info",
+                    f"Waiting at manual gate: {current.value}",
+                    context={"stage": current.value},
+                )
                 last_result = StageResult(
                     success=True,
                     stage=current.value,
@@ -91,7 +148,8 @@ class PipelineRunner:
             if not nxt_name:
                 break
             current = StageId(nxt_name)
-            if current == StageId.TURNAROUND and not pipe.multi_view:
+            pipe = self.db.get_pipeline(pipeline_id)
+            if pipe and current == StageId.TURNAROUND and not pipe.multi_view:
                 current = StageId.MESHY_I2D
 
         return last_result

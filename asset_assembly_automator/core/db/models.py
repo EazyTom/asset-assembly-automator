@@ -30,6 +30,7 @@ class Pipeline:
     id: int
     project_id: int
     asset_name: str
+    asset_kind: str
     current_stage: str
     status: str
     selected_concept_provider: str | None
@@ -100,10 +101,52 @@ def reset_local_database(db_path: Path | None = None) -> Path:
     return path
 
 
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Apply additive schema migrations for existing databases."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(pipelines)").fetchall()}
+    if "asset_kind" not in cols:
+        conn.execute(
+            "ALTER TABLE pipelines ADD COLUMN asset_kind TEXT NOT NULL DEFAULT 'character'"
+        )
+
+    stage_cols = {row[1] for row in conn.execute("PRAGMA table_info(pipeline_stages)").fetchall()}
+    if "duration_ms" not in stage_cols:
+        conn.execute("ALTER TABLE pipeline_stages ADD COLUMN duration_ms INTEGER")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pipeline_timing_stats (
+            pipeline_id INTEGER PRIMARY KEY REFERENCES pipelines(id) ON DELETE CASCADE,
+            recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+            trigger TEXT NOT NULL DEFAULT 'unity_import',
+            pipeline_wall_ms INTEGER,
+            stage_total_ms INTEGER,
+            meshy_total_ms INTEGER,
+            concept_ms INTEGER,
+            magnific_ms INTEGER,
+            unity_stage_ms INTEGER,
+            unity_csharp_ms INTEGER,
+            stage_durations_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pipeline_stages_pipeline "
+        "ON pipeline_stages(pipeline_id, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pipeline_stages_name "
+        "ON pipeline_stages(pipeline_id, stage_name, id DESC)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_log_entries_stage ON log_entries(stage_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(pipeline_id, asset_type)")
+
+
 def init_db(db_path: Path | None = None) -> None:
     conn = get_connection(db_path)
     schema = _schema_path().read_text(encoding="utf-8")
     conn.executescript(schema)
+    _run_migrations(conn)
     conn.commit()
 
 
@@ -119,10 +162,13 @@ def transaction(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
 
 
 def _row_to_pipeline(row: sqlite3.Row) -> Pipeline:
+    keys = row.keys()
+    asset_kind = row["asset_kind"] if "asset_kind" in keys else "character"
     return Pipeline(
         id=row["id"],
         project_id=row["project_id"],
         asset_name=row["asset_name"],
+        asset_kind=asset_kind or "character",
         current_stage=row["current_stage"],
         status=row["status"],
         selected_concept_provider=row["selected_concept_provider"],
@@ -170,13 +216,34 @@ class Database:
         *,
         poly_budget: str = "hero",
         multi_view: bool = False,
+        asset_kind: str = "character",
+        metadata: dict[str, Any] | None = None,
     ) -> int:
+        meta = {
+            "meshy_preset": "quality",
+            "texture_resolution": "8k",
+            "image_enhancement": True,
+            "remesh_enabled": False,
+            "magnific_enabled": True,
+            "smart_topology_polycount": 4000,
+            **(metadata or {}),
+        }
         cur = self.conn.execute(
             """
-            INSERT INTO pipelines (project_id, asset_name, poly_budget, multi_view, current_stage)
-            VALUES (?, ?, ?, ?, 'draft')
+            INSERT INTO pipelines (
+                project_id, asset_name, asset_kind, poly_budget, multi_view,
+                current_stage, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, 'draft', ?)
             """,
-            (project_id, asset_name, poly_budget, int(multi_view)),
+            (
+                project_id,
+                asset_name,
+                asset_kind,
+                poly_budget,
+                int(multi_view),
+                json.dumps(meta),
+            ),
         )
         self.conn.commit()
         return int(cur.lastrowid)
@@ -268,17 +335,43 @@ class Database:
         stage_name: str,
         status: str,
         *,
+        stage_row_id: int | None = None,
+        duration_ms: int | None = None,
         error_message: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> int:
         now = datetime.now(UTC).isoformat()
+        meta_json = json.dumps(metadata or {})
+
+        if stage_row_id is not None:
+            self.conn.execute(
+                """
+                UPDATE pipeline_stages
+                SET status = ?, completed_at = ?, duration_ms = COALESCE(?, duration_ms),
+                    error_message = ?, metadata_json = ?
+                WHERE id = ? AND pipeline_id = ?
+                """,
+                (
+                    status,
+                    now,
+                    duration_ms,
+                    error_message,
+                    meta_json,
+                    stage_row_id,
+                    pipeline_id,
+                ),
+            )
+            self.conn.commit()
+            return stage_row_id
+
         started = now if status in ("in_progress", "queued") else None
         completed = now if status in ("completed", "failed", "skipped") else None
         cur = self.conn.execute(
             """
             INSERT INTO pipeline_stages
-            (pipeline_id, stage_name, status, started_at, completed_at, error_message, metadata_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (pipeline_id, stage_name, status, started_at, completed_at, duration_ms,
+             error_message, metadata_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 pipeline_id,
@@ -286,12 +379,79 @@ class Database:
                 status,
                 started,
                 completed,
+                duration_ms,
                 error_message,
-                json.dumps(metadata or {}),
+                meta_json,
             ),
         )
         self.conn.commit()
         return int(cur.lastrowid)
+
+    def upsert_pipeline_timing_stats(
+        self,
+        pipeline_id: int,
+        *,
+        pipeline_wall_ms: int | None,
+        stage_total_ms: int,
+        meshy_total_ms: int,
+        concept_ms: int,
+        magnific_ms: int,
+        unity_stage_ms: int,
+        unity_csharp_ms: int | None,
+        stage_durations_json: dict[str, int],
+        trigger: str = "unity_import",
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        self.conn.execute(
+            """
+            INSERT INTO pipeline_timing_stats (
+                pipeline_id, recorded_at, trigger,
+                pipeline_wall_ms, stage_total_ms, meshy_total_ms, concept_ms,
+                magnific_ms, unity_stage_ms, unity_csharp_ms, stage_durations_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(pipeline_id) DO UPDATE SET
+                recorded_at = excluded.recorded_at,
+                trigger = excluded.trigger,
+                pipeline_wall_ms = excluded.pipeline_wall_ms,
+                stage_total_ms = excluded.stage_total_ms,
+                meshy_total_ms = excluded.meshy_total_ms,
+                concept_ms = excluded.concept_ms,
+                magnific_ms = excluded.magnific_ms,
+                unity_stage_ms = excluded.unity_stage_ms,
+                unity_csharp_ms = excluded.unity_csharp_ms,
+                stage_durations_json = excluded.stage_durations_json
+            """,
+            (
+                pipeline_id,
+                now,
+                trigger,
+                pipeline_wall_ms,
+                stage_total_ms,
+                meshy_total_ms,
+                concept_ms,
+                magnific_ms,
+                unity_stage_ms,
+                unity_csharp_ms,
+                json.dumps(stage_durations_json),
+            ),
+        )
+        self.conn.commit()
+
+    def get_pipeline_timing_stats(self, pipeline_id: int) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM pipeline_timing_stats WHERE pipeline_id = ?",
+            (pipeline_id,),
+        ).fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        raw = data.pop("stage_durations_json", "{}")
+        try:
+            data["stage_durations"] = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            data["stage_durations"] = {}
+        return data
 
     def add_log(
         self,

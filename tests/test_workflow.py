@@ -41,8 +41,8 @@ def test_load_unity_import_template():
     assert "{character_slug}" in text
     assert "Unity MCP" in text
     assert "```csharp" in text
-    assert "user-unity-mcp" in text
-    assert "Unity_ManageMenuItem" in text
+    assert "user-unity" in text
+    assert "unity_execute_code" in text
     assert "CharacterManifestImportUtility" in text
     assert "SUCCESS" in text or "Prefab saved" in text
     assert "oval" in text.lower()
@@ -55,7 +55,7 @@ def test_load_unity_cleanup_template():
     assert "{character_slug}" in text
     assert "PF_{character_slug}" in text
     assert "SUCCESS" in text
-    assert "execute_code" in text
+    assert "unity_execute_code" in text
     assert "Do not delete" in text
     assert (
         "GetComponentsInChildren" not in text
@@ -112,7 +112,10 @@ def test_compose_unity_mcp_prompts(workflow_db):
     assert "Assets/Characters/river_scout" in prompt
     assert "PF_river_scout" in prompt
     assert 'var slug = "river_scout"' in prompt
-    assert "Cleanup succeeds only when execute_code returns" in prompt
+    assert (
+        "Cleanup succeeds only when unity_execute_code returns" in prompt
+        or "execute_code returns" in prompt
+    )
     assert "Selected character only" in prompt
     assert "resolveCharacterFolderPaths" in prompt
 
@@ -134,7 +137,7 @@ def test_compose_unity_mcp_prompts(workflow_db):
     assert "oval" in import_prompt.lower()
     assert "PF_river_scout" in import_prompt
     assert 'ImportFromSlug("river_scout")' in import_prompt
-    assert "user-unity-mcp" in import_prompt
+    assert "user-unity" in import_prompt
     assert "walk.fbx" in import_prompt
 
 
@@ -251,7 +254,7 @@ async def test_s11_unity_import_staging(workflow_db):
     assert '"default_state": "Idle3"' in manifest
     assert '"Idle3"' in manifest
     assert '"aaa_helpers"' in manifest
-    assert "CharacterManifestImportUtility.cs" in manifest
+    assert "com.assetassembly.import" in manifest
     assert '"Idle4"' in manifest
     assert '"Idle12"' in manifest
 
@@ -292,8 +295,8 @@ async def test_cursor_cli_format_stream_event_message():
             "tool_call": {
                 "mcpToolCall": {
                     "args": {
-                        "server": "user-unityMCP",
-                        "toolName": "execute_code",
+                        "server": "user-unity",
+                        "toolName": "unity_execute_code",
                         "arguments": {
                             "action": "execute",
                             "code": "return AssetDatabase.Refresh();",
@@ -305,7 +308,7 @@ async def test_cursor_cli_format_stream_event_message():
     )
     assert started is not None
     assert "Tool started" in started
-    assert "execute_code" in started
+    assert "unity_execute_code" in started
     assert "execute" in started
 
     completed = format_stream_event_message(

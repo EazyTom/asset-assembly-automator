@@ -29,3 +29,9 @@ def load_unity_import_template() -> str:
 def load_unity_cleanup_template() -> str:
     path = _repo_root() / "config" / "workflows" / "unity_import_cleanup.md"
     return path.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def load_unity_import_repair_template() -> str:
+    path = _repo_root() / "config" / "workflows" / "unity_import_repair.md"
+    return path.read_text(encoding="utf-8")

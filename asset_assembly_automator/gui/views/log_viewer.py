@@ -25,7 +25,7 @@ from asset_assembly_automator.gui.theme.theme import LOG_LEVEL_COLORS
 
 
 class LogViewer(QWidget):
-    COLUMNS = ("Time", "Level", "Stage", "Message")
+    COLUMNS = ("Time", "Level", "Stage", "Duration", "Message")
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -67,7 +67,7 @@ class LogViewer(QWidget):
 
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels(list(self.COLUMNS))
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -183,6 +183,16 @@ class LogViewer(QWidget):
                 return False
         return True
 
+    def _duration_for(self, entry: dict[str, Any]) -> str:
+        ctx = entry.get("context") or {}
+        raw = ctx.get("duration_ms")
+        if raw is None:
+            return ""
+        try:
+            return f"{int(raw)} ms"
+        except (TypeError, ValueError):
+            return str(raw)
+
     def _insert_row(self, entry: dict[str, Any]) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
@@ -190,6 +200,7 @@ class LogViewer(QWidget):
             self._format_time(entry),
             entry.get("level", ""),
             self._stage_for(entry),
+            self._duration_for(entry),
             entry.get("message", ""),
         ]
         for col, text in enumerate(values):

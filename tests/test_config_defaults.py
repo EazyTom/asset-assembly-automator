@@ -24,6 +24,11 @@ def test_default_magnific_settings():
 
 def test_default_meshy_i2d_image_limits():
     meshy = get_settings().meshy
-    assert meshy.i2d_max_image_px == 2048
+    assert meshy.i2d_max_image_px == 4096
     assert meshy.i2d_max_image_mb == 18
     assert meshy.use_hires_texture_image is False
+    assert meshy.ai_model == "meshy-7"
+
+
+def test_default_unity_mcp_bridge():
+    assert get_settings().unity_mcp.bridge == "anklebreaker"

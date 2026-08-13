@@ -107,6 +107,20 @@ class MeshyClient(MeshProvider, RigProvider):
             await self._client.aclose()
             self._client = None
 
+    async def health_check(self) -> dict[str, Any]:
+        if not self.api_key:
+            return {"available": False, "reason": "MESHY_API_KEY not configured"}
+        try:
+            client = await self._get_client()
+            resp = await client.get("/openapi/v1/balance")
+            if resp.status_code == 401:
+                return {"available": False, "reason": "Meshy API key rejected (401)"}
+            resp.raise_for_status()
+            data = resp.json()
+            return {"available": True, "balance": data}
+        except Exception as exc:
+            return {"available": False, "reason": str(exc)}
+
     @retry(stop=stop_after_attempt(5), wait=wait_exponential_jitter(initial=1, max=30))
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         client = await self._get_client()
@@ -147,19 +161,37 @@ class MeshyClient(MeshProvider, RigProvider):
         texture_prompt: str | None = None,
         texture_image_url: str | None = None,
     ) -> dict[str, Any]:
+        model_type = cfg.get("model_type", "standard")
+        ai_model = cfg.get("ai_model", "meshy-7")
         payload: dict[str, Any] = {
-            "ai_model": cfg.get("ai_model", "latest"),
-            "model_type": cfg.get("model_type", "standard"),
+            "ai_model": ai_model,
+            "model_type": model_type,
             "enable_pbr": cfg.get("enable_pbr", True),
             "should_texture": cfg.get("should_texture", True),
-            "hd_texture": cfg.get("hd_texture", True),
-            "pose_mode": cfg.get("pose_mode", "t-pose"),
-            "topology": cfg.get("topology", "quad"),
-            "target_polycount": cfg.get("target_polycount", 300000),
+            "should_remesh": cfg.get("should_remesh", False),
             "target_formats": MeshyClient._i2d_target_formats(cfg),
             "image_enhancement": cfg.get("image_enhancement", True),
-            "remove_lighting": cfg.get("remove_lighting", True),
         }
+
+        if model_type == "smart-topology":
+            payload["ai_model"] = "meshy-t2"
+            payload["target_polycount"] = cfg.get("target_polycount", 4000)
+        else:
+            payload["topology"] = cfg.get("topology", "quad")
+            payload["target_polycount"] = cfg.get("target_polycount", 300000)
+            texture_resolution = cfg.get("texture_resolution")
+            if texture_resolution:
+                payload["texture_resolution"] = texture_resolution
+            elif cfg.get("hd_texture"):
+                payload["hd_texture"] = True
+            if cfg.get("ultra_mode"):
+                payload["ultra_mode"] = True
+            if ai_model == "meshy-6" and cfg.get("remove_lighting"):
+                payload["remove_lighting"] = True
+
+        if cfg.get("pose_mode"):
+            payload["pose_mode"] = cfg["pose_mode"]
+
         if image_urls is not None:
             payload["image_urls"] = image_urls
         elif image_url is not None:
@@ -544,6 +576,9 @@ class FakeMeshyClient(MeshyClient):
 
     async def close(self) -> None:
         pass
+
+    async def health_check(self) -> dict[str, Any]:
+        return {"available": True, "reason": "dry-run"}
 
     def _make_task(self, task_type: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         task_id = str(uuid.uuid4())

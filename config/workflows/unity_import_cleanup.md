@@ -1,6 +1,8 @@
 # Unity cleanup — {character_slug}
 
-You are a Cursor agent with **Unity MCP** (`user-unityMCP`). Unity Editor must be open on `{unity_project_path}`. Use MCP tools only — no Python in this repo.
+You are a Cursor agent with Unity MCP. **AAA default:** AnkleBreaker **`unity`** / **`user-unity`**. Unity 6 Editor must be open on `{unity_project_path}`. Use MCP tools only — no Python in this repo.
+
+> **Fallbacks:** Coplay **`user-unityMCP`** — use `execute_code` + `read_console` with the same C# script below. Official **`user-unity-mcp`** — wrap the script in `Unity_RunCommand`. Prefer the tool named in appended Facts for the configured bridge.
 
 ## Goal
 
@@ -19,16 +21,22 @@ Delete completely:
 
 - **Do NOT** create or edit `.cs` files.
 - **Do NOT** use `glob`, `grep`, or project exploration.
-- Run **exactly one** `execute_code` (`safety_checks: false`) with the script below — slug `{character_slug}` is already substituted — then **one** `read_console`.
+- Run **exactly one** code execution with the script below — slug `{character_slug}` is already substituted — then **one** console read.
+  - **Default (AnkleBreaker):** `unity_execute_code` then `unity_console_log`
+  - **Coplay:** `execute_code` then `read_console`
+  - **Official:** `Unity_RunCommand` then `Unity_GetConsoleLogs`
 - If the result is not `SUCCESS`, re-run the **same** script once. Do not use alternate approaches.
 
-Cleanup **failed** unless execute_code returns a line starting with `SUCCESS`.
+Cleanup **failed** unless the configured execute tool returns a line starting with `SUCCESS`.
 
 ---
 
-## Execute_code script (slug = `{character_slug}` ONLY)
+## Execute script (slug = `{character_slug}` ONLY)
+
+Run via configured MCP execute tool (default: **`unity_execute_code`**):
 
 ```csharp
+#if UNITY_EDITOR
 var slug = "{character_slug}";
 var prefabName = "PF_" + slug;
 var charFolder = "Assets/Characters/" + slug;
@@ -47,9 +55,9 @@ System.Func<string, bool> matchesCharacterObjectName = (name) => {
 System.Func<string, bool> deleteAssetPath = (path) => {
     if (string.IsNullOrEmpty(path)) return false;
     var rel = path.Replace('\\', '/');
-    if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(rel) != null || AssetDatabase.IsValidFolder(rel))
+    if (UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(rel) != null || UnityEditor.AssetDatabase.IsValidFolder(rel))
     {
-        if (AssetDatabase.DeleteAsset(rel))
+        if (UnityEditor.AssetDatabase.DeleteAsset(rel))
         {
             report.Add("deleted asset: " + rel);
             return true;
@@ -59,10 +67,10 @@ System.Func<string, bool> deleteAssetPath = (path) => {
     var fullPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(projectRoot, rel));
     if (System.IO.Directory.Exists(fullPath) || System.IO.File.Exists(fullPath))
     {
-        FileUtil.DeleteFileOrDirectory(rel);
+        UnityEditor.FileUtil.DeleteFileOrDirectory(rel);
         var meta = rel + ".meta";
         var metaFull = System.IO.Path.GetFullPath(System.IO.Path.Combine(projectRoot, meta));
-        if (System.IO.File.Exists(metaFull)) FileUtil.DeleteFileOrDirectory(meta);
+        if (System.IO.File.Exists(metaFull)) UnityEditor.FileUtil.DeleteFileOrDirectory(meta);
         report.Add("deleted via FileUtil: " + rel);
         return true;
     }
@@ -72,9 +80,9 @@ System.Func<string, bool> deleteAssetPath = (path) => {
 System.Func<System.Collections.Generic.List<string>> resolveCharacterFolderPaths = () => {
     var paths = new System.Collections.Generic.List<string>();
     if (!string.IsNullOrEmpty(charFolder)) paths.Add(charFolder);
-    if (AssetDatabase.IsValidFolder("Assets/Characters"))
+    if (UnityEditor.AssetDatabase.IsValidFolder("Assets/Characters"))
     {
-        foreach (var sub in AssetDatabase.GetSubFolders("Assets/Characters"))
+        foreach (var sub in UnityEditor.AssetDatabase.GetSubFolders("Assets/Characters"))
         {
             var folderName = System.IO.Path.GetFileName(sub.Replace('\\', '/'));
             if (string.Equals(folderName, slug, System.StringComparison.OrdinalIgnoreCase)
@@ -98,7 +106,7 @@ System.Func<System.Collections.Generic.List<string>> resolveCharacterFolderPaths
 
 System.Func<int> destroyMatchingSceneObjects = () => {
     var toDestroy = new System.Collections.Generic.List<UnityEngine.GameObject>();
-    foreach (var go in Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>())
+    foreach (var go in UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>())
     {
         if (go == null) continue;
         if (UnityEditor.EditorUtility.IsPersistent(go)) continue;
@@ -120,7 +128,7 @@ System.Func<int> destroyMatchingSceneObjects = () => {
 System.Func<bool> characterFolderStillExists = () => {
     foreach (var path in resolveCharacterFolderPaths())
     {
-        if (AssetDatabase.IsValidFolder(path)) return true;
+        if (UnityEditor.AssetDatabase.IsValidFolder(path)) return true;
         var rel = path.Replace('\\', '/');
         var fullPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(projectRoot, rel));
         if (System.IO.Directory.Exists(fullPath)) return true;
@@ -130,7 +138,7 @@ System.Func<bool> characterFolderStillExists = () => {
 
 System.Func<int> countMatchingSceneObjects = () => {
     var count = 0;
-    foreach (var go in Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>())
+    foreach (var go in UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>())
     {
         if (go == null) continue;
         if (UnityEditor.EditorUtility.IsPersistent(go)) continue;
@@ -144,7 +152,7 @@ System.Action runCleanupPass = () => {
     var destroyed = destroyMatchingSceneObjects();
     if (destroyed == 0) report.Add("no scene instance matched: " + prefabName + " or " + slug);
 
-    if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(prefabAsset) != null
+    if (UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(prefabAsset) != null
         || System.IO.File.Exists(System.IO.Path.Combine(projectRoot, prefabAsset.Replace('/', System.IO.Path.DirectorySeparatorChar))))
         deleteAssetPath(prefabAsset);
 
@@ -153,14 +161,14 @@ System.Action runCleanupPass = () => {
         deletedAnyFolder = deleteAssetPath(folderPath) || deletedAnyFolder;
     if (!deletedAnyFolder) report.Add("character folder not found: " + charFolder);
 
-    if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(patrolScript) != null)
+    if (UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(patrolScript) != null)
         deleteAssetPath(patrolScript);
 
     System.Action<string> deleteSlugScriptsInFolder = (folder) => {
-        if (!AssetDatabase.IsValidFolder(folder)) return;
-        foreach (var guid in AssetDatabase.FindAssets("t:Script", new string[] { folder }))
+        if (!UnityEditor.AssetDatabase.IsValidFolder(folder)) return;
+        foreach (var guid in UnityEditor.AssetDatabase.FindAssets("t:Script", new string[] { folder }))
         {
-            var path = AssetDatabase.GUIDToAssetPath(guid);
+            var path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
             var fileName = System.IO.Path.GetFileNameWithoutExtension(path);
             if (fileName.IndexOf(slug, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
             if (fileName.EndsWith("ImportUtility", System.StringComparison.OrdinalIgnoreCase)
@@ -171,8 +179,8 @@ System.Action runCleanupPass = () => {
     deleteSlugScriptsInFolder("Assets/Scripts");
     deleteSlugScriptsInFolder("Assets/Editor");
 
-    AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-    AssetDatabase.SaveAssets();
+    UnityEditor.AssetDatabase.Refresh(UnityEditor.ImportAssetOptions.ForceUpdate);
+    UnityEditor.AssetDatabase.SaveAssets();
     UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(activeScene);
     UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes();
 };
@@ -193,6 +201,7 @@ if (characterFolderStillExists())
     return "ERROR character folder still exists for slug " + slug + " under Assets/Characters\n" + string.Join("\n", report.ToArray());
 
 return "SUCCESS removed character slug=" + slug + "\n" + string.Join("\n", report.ToArray());
+#endif
 ```
 
 ## Validation (must pass)
@@ -202,7 +211,7 @@ return "SUCCESS removed character slug=" + slug + "\n" + string.Join("\n", repor
 - Zero scene objects named `PF_{character_slug}` or `{character_slug}` in the active scene
 - No folder under `Assets/Characters/` whose name matches `{character_slug}` (case-insensitive), on disk or in AssetDatabase
 
-Report the execute_code return value verbatim.
+Report the configured execute tool return value verbatim.
 
 ## Do not delete
 

@@ -68,7 +68,8 @@ class GettingStartedDialog(QDialog):
         key_ok = bool(meshy_api_key())
         self.status_label.setText(
             f"Meshy API key: {'configured' if key_ok else 'missing'} | "
-            "Higgsfield MCP: check Cursor plugin | Unity MCP: optional"
+            "Unity 6 + Unity MCP (default AnkleBreaker) required for import/repair | "
+            "Concept: MJ / Magnific / optional Higgsfield"
         )
 
     def accept(self) -> None:

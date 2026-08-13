@@ -18,6 +18,49 @@ from asset_assembly_automator.stages._base import (
 async def _run(ctx, db, dirs, writer):
     settings = get_settings()
     pipe = db.get_pipeline(ctx.pipeline_id)
+    from asset_assembly_automator.core.state_machine import asset_kind_for_pipeline
+
+    kind = asset_kind_for_pipeline(pipe)
+    next_after_remesh = (
+        StageId.MESHY_RIG.value if kind == "character" else StageId.MESHY_DOWNLOAD.value
+    )
+
+    if not pipe.metadata.get("remesh_enabled", False):
+        writer.log(
+            "info",
+            "Remesh skipped — disabled for pipeline",
+            skipped=True,
+            reason="remesh_disabled",
+        )
+        next_after_remesh = (
+            StageId.MESHY_RIG.value if kind == "character" else StageId.MESHY_DOWNLOAD.value
+        )
+        return StageResult(
+            success=True,
+            stage=StageId.MESHY_REMESH.value,
+            message="Remesh skipped (disabled)",
+            next_stage=next_after_remesh,
+            data={"skipped": True, "reason": "remesh_disabled"},
+        )
+
+    if pipe.metadata.get("meshy_preset") == "game_ready":
+        writer.log(
+            "info",
+            "Remesh skipped — game-ready smart topology preset",
+            skipped=True,
+            reason="smart_topology",
+        )
+        next_after_remesh = (
+            StageId.MESHY_RIG.value if kind == "character" else StageId.MESHY_DOWNLOAD.value
+        )
+        return StageResult(
+            success=True,
+            stage=StageId.MESHY_REMESH.value,
+            message="Remesh skipped — smart-topology preset",
+            next_stage=next_after_remesh,
+            data={"skipped": True, "reason": "smart_topology"},
+        )
+
     i2d_job = db.get_external_job(ctx.pipeline_id, "image-to-3d", active_only=False)
     if not i2d_job:
         return StageResult(success=False, stage=StageId.MESHY_REMESH.value, error="No i2d job")
@@ -62,11 +105,14 @@ async def _run(ctx, db, dirs, writer):
             db.update_pipeline_stage(
                 ctx.pipeline_id, StageId.MESHY_REMESH.value, metadata=pipe.metadata
             )
+            next_after_remesh = (
+                StageId.MESHY_RIG.value if kind == "character" else StageId.MESHY_DOWNLOAD.value
+            )
             return StageResult(
                 success=True,
                 stage=StageId.MESHY_REMESH.value,
                 message="Remesh skipped — i2d lowpoly output already game-ready",
-                next_stage=StageId.MESHY_RIG.value,
+                next_stage=next_after_remesh,
                 data={
                     "skipped": True,
                     "reason": "lowpoly_i2d",
@@ -102,7 +148,7 @@ async def _run(ctx, db, dirs, writer):
                     f"Remesh skipped — source {source_face_count:,} tris "
                     f"already at or below target {target:,}"
                 ),
-                next_stage=StageId.MESHY_RIG.value,
+                next_stage=next_after_remesh,
                 data={
                     "skipped": True,
                     "source_face_count": source_face_count,
@@ -144,7 +190,7 @@ async def _run(ctx, db, dirs, writer):
                     success=True,
                     stage=StageId.MESHY_REMESH.value,
                     message=f"Remeshed to {target} tris",
-                    next_stage=StageId.MESHY_RIG.value,
+                    next_stage=next_after_remesh,
                     data={"task_id": task_id, "target_polycount": target},
                 )
 
@@ -169,7 +215,7 @@ async def _run(ctx, db, dirs, writer):
             success=status == "SUCCEEDED",
             stage=StageId.MESHY_REMESH.value,
             message=f"Remeshed to {target} tris",
-            next_stage=StageId.MESHY_RIG.value,
+            next_stage=next_after_remesh,
             data={"task_id": task_id, "target_polycount": target},
             error=None if status == "SUCCEEDED" else f"Remesh failed: {status}",
         )

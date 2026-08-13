@@ -12,6 +12,10 @@ from asset_assembly_automator.core.output_paths import pipeline_output_slug
 from asset_assembly_automator.workflow.templates import (
     load_unity_cleanup_template,
 )
+from asset_assembly_automator.workflow.unity_mcp_bridges import (
+    compose_bridge_facts,
+    resolve_unity_mcp_bridge,
+)
 
 OnLineCallback = Any
 
@@ -26,6 +30,7 @@ def _render_workflow_template(template: str, **values: str) -> str:
 
 def _character_facts(
     *,
+    db=None,
     asset_name: str,
     character_slug: str,
     unity_project_path: str,
@@ -44,6 +49,8 @@ def _character_facts(
     zip_line = (
         str(unity_import_zip) if unity_import_zip else "(no zip — use staged FBXs in character_dir)"
     )
+    bridge = resolve_unity_mcp_bridge(db=db)
+    bridge_facts = "\n".join(bridge.facts_lines())
     return f"""
 ## Facts (auto-generated — do not ignore)
 
@@ -62,13 +69,12 @@ def _character_facts(
 - Material out: {character_dir}/Materials/MAT_{character_slug}_Body.mat
 - Controller out: {character_dir}/Controllers/{character_slug}_Controller.controller
 - Prefab out: {character_dir}/Prefabs/PF_{character_slug}.prefab
-- MCP server: user-unity-mcp (not user-unityMCP)
-- Helper scripts (AAA installs before MCP; verify in Phase 0):
-  - Assets/Editor/CharacterManifestImportUtility.cs
-  - Assets/Scripts/CharacterOvalPatrol.cs
-- Import trigger: Unity_RunCommand calling CharacterManifestImportUtility.ImportFromSlug("{character_slug}")
-  OR menu Tools/Characters/Import character from manifest...
-- Do not use Unity_ImportExternalModel or inline SaveAndReimport scripts
+{bridge_facts}
+- Helper package (AAA s11 injects before MCP; verify in Phase 0):
+  - com.assetassembly.import UPM (CharacterManifestImportUtility, CharacterOvalPatrol, validators)
+- Import trigger: {bridge.execute_code_tool} calling CharacterManifestImportUtility.ImportFromSlug("{character_slug}")
+  OR {bridge.execute_menu_tool} → Tools/Characters/Import character from manifest...
+- Do not use quick-import shortcuts or inline SaveAndReimport loops
 
 ### Staged files
 {file_lines}
@@ -80,14 +86,18 @@ def _character_facts(
 
 def _cleanup_facts(
     *,
+    db=None,
     asset_name: str,
     character_slug: str,
     unity_project_path: str,
     character_dir: Path,
 ) -> str:
+    bridge = resolve_unity_mcp_bridge(db=db)
+    bridge_facts = "\n".join(bridge.facts_lines())
     return f"""
 ## Facts (auto-generated — do not ignore)
 
+{bridge_facts}
 - **Selected character only** — remove slug `{character_slug}` and nothing else
 - Asset display name: {asset_name}
 - Character slug (from workflow dropdown): {character_slug}
@@ -97,7 +107,7 @@ def _cleanup_facts(
 - Prefab asset path: {character_dir}/Prefabs/PF_{character_slug}.prefab
 - Legacy patrol script (delete if present): Assets/Scripts/{character_slug}CircularPatrol.cs
 - Agent-created Editor import utilities matching slug (delete if present): Assets/Editor/*{character_slug}*ImportUtility.cs
-- Cleanup succeeds only when execute_code returns a line starting with SUCCESS
+- Cleanup succeeds only when {bridge.execute_code_tool} returns a line starting with SUCCESS
 - Do NOT delete other characters under Assets/Characters/
 """.strip()
 
@@ -109,6 +119,7 @@ def compose_cleanup_prompt(
     unity_project_path: str,
     character_dir: Path,
     guidance: str | None = None,
+    db=None,
 ) -> str:
     template = guidance or load_unity_cleanup_template()
     rendered = _render_workflow_template(
@@ -118,12 +129,13 @@ def compose_cleanup_prompt(
         character_dir=str(character_dir),
     )
     facts = _cleanup_facts(
+        db=db,
         asset_name=asset_name,
         character_slug=character_slug,
         unity_project_path=unity_project_path,
         character_dir=character_dir,
     )
-    return f"{rendered}\n\n{facts}"
+    return f"{rendered}\n\n{facts}\n\n{compose_bridge_facts(db=db)}"
 
 
 def compose_import_prompt(
@@ -137,6 +149,7 @@ def compose_import_prompt(
     staged_files: list[str],
     clips: list[dict[str, str]],
     unity_import_zip: Path | str | None = None,
+    db=None,
 ) -> str:
     rendered = _render_workflow_template(
         guidance,
@@ -148,6 +161,7 @@ def compose_import_prompt(
         clips=json.dumps(clips, indent=2),
     )
     facts = _character_facts(
+        db=db,
         asset_name=asset_name,
         character_slug=character_slug,
         unity_project_path=unity_project_path,
@@ -157,7 +171,7 @@ def compose_import_prompt(
         staged_files=staged_files,
         clips=clips,
     )
-    return f"{rendered}\n\n{facts}"
+    return f"{rendered}\n\n{facts}\n\n{compose_bridge_facts(db=db)}"
 
 
 def unity_character_dir(db: Database, pipeline_id: int) -> tuple[Path, str, str]:
@@ -243,6 +257,7 @@ async def run_unity_cleanup_workflow(
         unity_project_path=str(project.unity_project_path),
         character_dir=character_dir,
         guidance=guidance,
+        db=db,
     )
     from asset_assembly_automator.stages._base import get_cursor_cli_client
 

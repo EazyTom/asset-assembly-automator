@@ -118,7 +118,7 @@ Every stage should:
 | **Higgsfield** | Platform REST by default — v1 live runs use **hosted MCP** (`https://mcp.higgsfield.ai/mcp`) via `McpHiggsfieldAdapter`; REST fallback when `higgsfield.provider: rest` |
 | **Higgsfield auth** | Cursor plugin OAuth is separate from the GUI; first GUI run opens browser OAuth once; tokens in `mcp/higgsfield_oauth.json` |
 | **Midjourney** | No API — manual generate + watch-folder import only |
-| **Unity MCP** | Phase 2 only — v1 stops at FBX.zip export |
+| **Unity MCP** | **Default AnkleBreaker** (`unity` / user-unity); **Coplay** + **Official** fallbacks — Settings or `unity_mcp.bridge`; happy-path import is C# UPM package |
 | **Blender/ARP** | Phase 2 fallback — requires live Blender GUI, not headless |
 
 ## Secrets

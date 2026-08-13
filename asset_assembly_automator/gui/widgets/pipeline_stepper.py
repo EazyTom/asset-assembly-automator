@@ -16,6 +16,7 @@ _STYLE_STALE = f"color: {STATUS_COLORS['failed']}; font-size: 16px; font-weight:
 
 STAGE_DISPLAY_LABELS: dict[str, str] = {
     StageId.IMAGE_PREP.value: "Concept Image",
+    StageId.MAGNIFIC_UPREZ.value: "Magnific Uprez",
 }
 
 

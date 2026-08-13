@@ -449,7 +449,7 @@ class PipelineController(QObject):
             if cli_ok and not workflow_ok:
                 msg = (
                     final_text.strip()
-                    or "Unity cleanup finished without SUCCESS confirmation from execute_code"
+                    or "Unity cleanup finished without SUCCESS confirmation from MCP execute tool"
                 )
             else:
                 msg = final_text or result.get("reason") or "Unity cleanup finished"

@@ -116,24 +116,28 @@ def test_meshy_settings_for_pipeline_hero(db):
     assert cfg["target_polycount"] == 300000
     assert cfg["enable_pbr"] is True
     assert cfg["should_texture"] is True
-    assert cfg["hd_texture"] is True
-    assert cfg["remove_lighting"] is True
+    assert cfg["texture_resolution"] == "8k"
     assert cfg["model_type"] == "standard"
     assert cfg["target_formats"] == ["fbx", "glb"]
 
 
-def test_meshy_settings_for_pipeline_npc_uses_lowpoly(db):
+def test_meshy_settings_for_pipeline_game_ready(db):
     from asset_assembly_automator.stages._base import (
         meshy_settings_for_pipeline,
         resolve_i2d_model_type,
     )
 
     database, pipeline_id = db
-    database.update_pipeline_poly_budget(pipeline_id, "npc")
     pipe = database.get_pipeline(pipeline_id)
-    assert resolve_i2d_model_type(pipe) == "lowpoly"
+    database.update_pipeline_stage(
+        pipeline_id,
+        pipe.current_stage,
+        metadata={**pipe.metadata, "meshy_preset": "game_ready"},
+    )
+    pipe = database.get_pipeline(pipeline_id)
+    assert resolve_i2d_model_type(pipe) == "smart-topology"
     cfg = meshy_settings_for_pipeline(pipe)
-    assert cfg["model_type"] == "lowpoly"
+    assert cfg["model_type"] == "smart-topology"
     assert cfg["target_formats"] == ["fbx", "glb"]
 
 

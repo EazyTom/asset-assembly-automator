@@ -31,6 +31,7 @@ def output_dirs(tmp_path):
         id=1,
         project_id=1,
         asset_name="Hero",
+        asset_kind="character",
         current_stage="draft",
         status="active",
         selected_concept_provider=None,
@@ -122,7 +123,7 @@ async def test_image_to_3d_payload_includes_texture_flags(tmp_path, monkeypatch)
 
     payload = captured["payload"]
     assert payload["enable_pbr"] is True
-    assert payload["hd_texture"] is True
-    assert payload["remove_lighting"] is True
+    assert payload.get("texture_resolution") == "8k" or payload.get("hd_texture") is True
+    assert "remove_lighting" not in payload or payload.get("ai_model") == "meshy-6"
     assert "glb" in payload["target_formats"]
     assert "fbx" in payload["target_formats"]

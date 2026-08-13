@@ -40,11 +40,7 @@ async def _run(ctx, db, dirs, writer):
 
     copy2(asset["file_path"], approved)
     db.add_asset(ctx.pipeline_id, "tpose", str(approved), provider=provider)
-    next_stage = (
-        StageId.TURNAROUND.value
-        if db.get_pipeline(ctx.pipeline_id).multi_view
-        else StageId.IMAGE_PREP.value
-    )
+    next_stage = StageId.MAGNIFIC_UPREZ.value
     return StageResult(
         success=True,
         stage=StageId.CONCEPT_REVIEW.value,

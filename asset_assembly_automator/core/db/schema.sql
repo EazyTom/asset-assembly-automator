@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS pipelines (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     asset_name TEXT NOT NULL,
+    asset_kind TEXT NOT NULL DEFAULT 'character',
     current_stage TEXT NOT NULL DEFAULT 'draft',
     status TEXT NOT NULL DEFAULT 'active',
     selected_concept_provider TEXT,
@@ -36,8 +37,23 @@ CREATE TABLE IF NOT EXISTS pipeline_stages (
     status TEXT NOT NULL DEFAULT 'pending',
     started_at TEXT,
     completed_at TEXT,
+    duration_ms INTEGER,
     error_message TEXT,
     metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_timing_stats (
+    pipeline_id INTEGER PRIMARY KEY REFERENCES pipelines(id) ON DELETE CASCADE,
+    recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+    trigger TEXT NOT NULL DEFAULT 'unity_import',
+    pipeline_wall_ms INTEGER,
+    stage_total_ms INTEGER,
+    meshy_total_ms INTEGER,
+    concept_ms INTEGER,
+    magnific_ms INTEGER,
+    unity_stage_ms INTEGER,
+    unity_csharp_ms INTEGER,
+    stage_durations_json TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS prompts (
@@ -106,6 +122,10 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE INDEX IF NOT EXISTS idx_pipelines_status ON pipelines(status);
 CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_stages_pipeline ON pipeline_stages(pipeline_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_pipeline_stages_name ON pipeline_stages(pipeline_id, stage_name, id DESC);
 CREATE INDEX IF NOT EXISTS idx_external_jobs_pipeline ON external_jobs(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_log_entries_pipeline ON log_entries(pipeline_id, id);
+CREATE INDEX IF NOT EXISTS idx_log_entries_stage ON log_entries(stage_id);
 CREATE INDEX IF NOT EXISTS idx_assets_pipeline ON assets(pipeline_id);
+CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(pipeline_id, asset_type);

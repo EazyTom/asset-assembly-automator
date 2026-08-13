@@ -1,4 +1,4 @@
-"""Install AAA Unity import helper scripts into a Unity project."""
+"""Install com.assetassembly.import UPM package into a Unity project."""
 
 from __future__ import annotations
 
@@ -7,9 +7,88 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# workflow/ -> asset_assembly_automator/ -> repo root
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_TEMPLATES_ROOT = _REPO_ROOT / "unity_templates" / "Assets"
+_PACKAGE_SOURCE = _REPO_ROOT / "unity_package" / "com.assetassembly.import"
+_PACKAGE_NAME = "com.assetassembly.import"
+_FALLBACK_TEMPLATES = _REPO_ROOT / "unity_templates" / "Assets"
+
+
+@dataclass
+class UnityPackageInstallResult:
+    installed: bool = False
+    updated: bool = False
+    unchanged: bool = False
+    used_fallback: bool = False
+    package_path: str = ""
+    missing_source: bool = False
+    errors: list[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        if self.missing_source:
+            return "package source missing"
+        parts: list[str] = []
+        if self.installed:
+            parts.append("installed")
+        if self.updated:
+            parts.append("updated")
+        if self.unchanged:
+            parts.append("unchanged")
+        if self.used_fallback:
+            parts.append("fallback Assets copy")
+        return ", ".join(parts) if parts else "no changes"
+
+
+def _digest_dir(path: Path) -> str:
+    h = hashlib.sha256()
+    for file in sorted(path.rglob("*")):
+        if file.is_file() and file.suffix not in {".meta"}:
+            rel = file.relative_to(path).as_posix()
+            h.update(rel.encode())
+            h.update(file.read_bytes())
+    return h.hexdigest()
+
+
+def ensure_unity_import_package(unity_project_path: Path | str) -> UnityPackageInstallResult:
+    """Sync AAA UPM package into Unity Packages/com.assetassembly.import."""
+    unity_root = Path(unity_project_path)
+    dest = unity_root / "Packages" / _PACKAGE_NAME
+    result = UnityPackageInstallResult(package_path=str(dest))
+
+    if not _PACKAGE_SOURCE.is_dir():
+        result.missing_source = True
+        return _fallback_copy_helpers(unity_root, result)
+
+    source_digest = _digest_dir(_PACKAGE_SOURCE)
+    if dest.is_dir():
+        dest_digest = _digest_dir(dest)
+        if dest_digest == source_digest:
+            result.unchanged = True
+            return result
+        shutil.rmtree(dest)
+        result.updated = True
+    else:
+        result.installed = True
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(_PACKAGE_SOURCE, dest)
+    return result
+
+
+def _fallback_copy_helpers(
+    unity_root: Path, result: UnityPackageInstallResult
+) -> UnityPackageInstallResult:
+    """Last resort: copy legacy template scripts into Assets/AAA.Import/."""
+    result.used_fallback = True
+    for rel_template, rel_dest in HELPER_FILES.items():
+        src = _FALLBACK_TEMPLATES / rel_template
+        dest = unity_root / rel_dest.replace("Assets/", "Assets/AAA.Import/")
+        if not src.is_file():
+            result.errors.append(f"missing template {src}")
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+    return result
+
 
 HELPER_FILES: dict[str, str] = {
     "Editor/CharacterManifestImportUtility.cs": "Assets/Editor/CharacterManifestImportUtility.cs",
@@ -17,74 +96,24 @@ HELPER_FILES: dict[str, str] = {
 }
 
 
-@dataclass
-class UnityHelperInstallResult:
-    installed: list[str] = field(default_factory=list)
-    updated: list[str] = field(default_factory=list)
-    unchanged: list[str] = field(default_factory=list)
-    missing_templates: list[str] = field(default_factory=list)
-
-    @property
-    def changed(self) -> bool:
-        return bool(self.installed or self.updated)
-
-    def summary(self) -> str:
-        parts: list[str] = []
-        if self.installed:
-            parts.append(f"installed {len(self.installed)}")
-        if self.updated:
-            parts.append(f"updated {len(self.updated)}")
-        if self.unchanged:
-            parts.append(f"unchanged {len(self.unchanged)}")
-        if self.missing_templates:
-            parts.append(f"missing templates {len(self.missing_templates)}")
-        return ", ".join(parts) if parts else "no helper scripts configured"
-
-
-def _file_digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def ensure_unity_import_helpers(unity_project_path: Path | str) -> UnityHelperInstallResult:
-    """Copy helper C# scripts from unity_templates into the Unity project if missing or stale."""
-    unity_root = Path(unity_project_path)
-    assets_root = unity_root / "Assets"
-    result = UnityHelperInstallResult()
-
-    assets_root.mkdir(parents=True, exist_ok=True)
-
-    for rel_template, rel_dest in HELPER_FILES.items():
-        src = _TEMPLATES_ROOT / rel_template
-        dest = unity_root / rel_dest
-
-        if not src.is_file():
-            result.missing_templates.append(str(src))
-            continue
-
-        dest.parent.mkdir(parents=True, exist_ok=True)
-
-        if not dest.exists():
-            shutil.copy2(src, dest)
-            result.installed.append(str(dest))
-            continue
-
-        if _file_digest(src) == _file_digest(dest):
-            result.unchanged.append(str(dest))
-            continue
-
-        shutil.copy2(src, dest)
-        result.updated.append(str(dest))
-
-    return result
-
-
-def helper_script_paths(unity_project_path: Path | str) -> dict[str, Path]:
-    """Return expected helper script paths inside a Unity project."""
-    unity_root = Path(unity_project_path)
-    return {name: unity_root / dest for name, dest in HELPER_FILES.items()}
+def ensure_unity_import_helpers(unity_project_path: Path | str) -> UnityPackageInstallResult:
+    """Backward-compatible alias — installs UPM package (preferred) or fallback Assets copy."""
+    return ensure_unity_import_package(unity_project_path)
 
 
 def helpers_present(unity_project_path: Path | str) -> bool:
-    """True when both helper scripts exist in the Unity project."""
-    paths = helper_script_paths(unity_project_path)
-    return all(path.is_file() for path in paths.values())
+    unity_root = Path(unity_project_path)
+    package_editor = (
+        unity_root / "Packages" / _PACKAGE_NAME / "Editor" / "CharacterManifestImportUtility.cs"
+    )
+    if package_editor.is_file():
+        return True
+    legacy = unity_root / "Assets" / "Editor" / "CharacterManifestImportUtility.cs"
+    return legacy.is_file()
+
+
+def unity_asset_root(unity_project_path: Path | str, asset_kind: str, slug: str) -> Path:
+    folder = {"character": "Characters", "vehicle": "Vehicles", "aircraft": "Aircraft"}.get(
+        asset_kind, "Characters"
+    )
+    return Path(unity_project_path) / "Assets" / folder / slug

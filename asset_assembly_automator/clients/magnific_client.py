@@ -104,6 +104,9 @@ class FakeMagnificClient:
     async def get_cost(self, action: str, **kwargs: Any) -> dict[str, Any]:
         return {"cost": {"credits": 1, "credits_exact": 1.0, "action": action}}
 
+    async def health_check(self) -> dict[str, Any]:
+        return {"available": True, "reason": "dry-run"}
+
 
 class MagnificClient:
     """Magnific REST client for Mystic text-to-image and upscaler APIs."""
@@ -138,6 +141,19 @@ class MagnificClient:
         if self._client:
             await self._client.aclose()
             self._client = None
+
+    async def health_check(self) -> dict[str, Any]:
+        if not self.api_key:
+            return {"available": False, "reason": "MAGNIFIC_API_KEY not configured"}
+        try:
+            client = await self._get_client()
+            resp = await client.get("/v1/user/profile")
+            if resp.status_code == 401:
+                return {"available": False, "reason": "Magnific API key rejected (401)"}
+            resp.raise_for_status()
+            return {"available": True}
+        except Exception as exc:
+            return {"available": False, "reason": str(exc)}
 
     @staticmethod
     def _task_payload(data: dict[str, Any]) -> dict[str, Any]:

@@ -1,8 +1,8 @@
 # Asset Assembly Automator (AAA)
 
-![AAA screenshot](AAA-screenshot.png)
+![AAA screenshot](AAA-screenshot-202.png)
 
-**Version 0.1.0** — Python + PyQt6 orchestrator for the character asset pipeline: concept art (Higgsfield / Magnific / Midjourney) → Meshy image-to-3D → rig + animations → FBX.zip → optional Unity MCP import.
+**Version 0.2.0** — Python + PyQt6 orchestrator for Character / Vehicle / Aircraft pipelines: approved concept (Midjourney drop, Magnific, or optional Higgsfield) → Meshy 7 → FBX.zip → deterministic Unity import.
 
 Two GUI entry points share the same SQLite database, stage modules, and provider clients:
 
@@ -23,25 +23,53 @@ python -m venv .venv
 .\launch-workflow.bat
 ```
 
-Copy [`secrets.env.example`](secrets.env.example) to `%USERPROFILE%\.asset_assembly_automator\secrets.env` and fill in keys:
+Copy [`secrets.env.example`](secrets.env.example) to `%USERPROFILE%\.asset_assembly_automator\secrets.env`:
 
 ```env
+# Required for Meshy stages
 MESHY_API_KEY=your_key_here
+
+# Optional concept / uprez providers
 MAGNIFIC_API_KEY=your_key_here
 HF_MCP_ACCESS_TOKEN=optional_for_higgsfield_mcp
 ```
+
+Only **Meshy** is required for FBX export. **Unity 6** and a **Unity MCP** bridge are **required** for `unity_import`, cleanup, and Diagnostics (see [Required dependencies](#required-dependencies) below).
 
 Legacy fallback: repo-root `meshy-api.key` / `magnific-api.key` (gitignored — **do not commit**).
 
 ---
 
+## Required dependencies
+
+| Dependency | Required for | Notes |
+|------------|--------------|-------|
+| **Meshy API key** | Meshy stages → FBX.zip | Only paid API for the 3D chain |
+| **Unity 6 Editor** | `s11` unity_import | Target project open during import |
+| **Unity MCP** (one bridge) | Agent repair, cleanup, Diagnostics | Default **AnkleBreaker** `unity` / **user-unity**; Coplay and Official fallbacks supported (Settings → Unity MCP bridge) |
+| **Cursor or Claude CLI** | Agent repair + Diagnostics ping | Settings → Agent for Unity repair |
+
+### Unity MCP — default AnkleBreaker, fallbacks supported
+
+AAA **defaults** to **[AnkleBreaker `unity-mcp-server`](https://github.com/naniknataraj/unity-mcp-server)** (`unity` → **user-unity**, `unity_*` tools). **Coplay** and **Official Unity MCP** are supported fallbacks — pick in **Settings → Unity MCP bridge** or `unity_mcp.bridge` in user config.
+
+| Priority | Bridge | Cursor server id |
+|----------|--------|------------------|
+| **1 — Default** | **AnkleBreaker** | `unity` / **user-unity** |
+| **2 — Fallback** | **Coplay Unity MCP** | **user-unityMCP** |
+| **3 — Fallback** | **Official Unity MCP** | **user-unity-mcp** |
+
+Copy [`mcp.json.example`](mcp.json.example) → `.mcp.json` (gitignored). Enable **one** Unity bridge at a time.
+
+---
+
 ## Meshy Workflow — Concept Image (new)
 
-The workflow app now supports **in-app concept generation** before Meshy, in addition to drag-and-drop:
+The workflow app supports **in-app concept generation** before Meshy, in addition to drag-and-drop and Midjourney imports:
 
 1. Select or create a **project** and **character name**.
 2. Edit the **Concept Image** prompt (prefilled T-pose character-sheet template).
-3. Click **Use Higgs** or **Use Magnific** to generate a concept (cost confirmation; skipped in dry-run).
+3. **Optional:** click **Use Higgs** or **Use Magnific** to generate in-app (cost confirmation; skipped in dry-run). Or drag-drop / import a PNG from Midjourney — no Higgsfield needed.
 4. Optionally click **Uprez** with Magnific (Mode: Precision V2 / Creative; Scale: 2x–16x; Flavor for Precision).
 5. Preview the result → **Save** (writes `TPose/CHR_{slug}_TPose_Approved_v01.png`) → **Run Meshy**.
 
@@ -100,7 +128,7 @@ flowchart TB
         MJ[Midjourney manual]
         MS[Meshy REST API]
         CUR[Cursor CLI agent]
-        UMC[user-unity-mcp]
+        UMC[user-unity AnkleBreaker]
         UE[Unity Editor]
     end
     LB --> MW
@@ -245,37 +273,36 @@ Optional: set `meshy.use_hires_texture_image: true` in user config to pass the h
 
 ---
 
-## Unity import chain (Phase 2)
+## Unity import chain (s11)
 
-Python stages files; a Cursor agent drives Unity MCP.
+Python stages files; **deterministic C# import** runs in Unity; AnkleBreaker MCP is used only for repair, cleanup, and Diagnostics.
 
 ```mermaid
 sequenceDiagram
     participant W as WorkflowWindow
     participant S11 as s11_unity_import
     participant Disk as Unity Assets/Characters/slug
-    participant CLI as CursorCliClient
+    participant CS as AaaImportRunner C#
+    participant CLI as Agent CLI
     participant Agent as Cursor agent
-    participant MCP as user-unity-mcp
-    participant Util as CharacterManifestImportUtility
+    participant MCP as user-unity
     participant UE as Unity Editor
 
     W->>S11: Import to Unity
-    S11->>Disk: Copy Source + Textures
-    S11->>Disk: Write unity_import_manifest.json
-    S11->>CLI: compose_import_prompt
-    CLI->>Agent: cursor-agent + workflow MD
-    Agent->>MCP: Unity_ManageEditor GetState
-    Agent->>MCP: Unity_ManageMenuItem or Unity_RunCommand
-    MCP->>Util: ImportFromSlug slug
-    Util->>UE: Humanoid rig clips controller prefab patrol
-    Agent->>MCP: Verify + Play
-    Agent-->>W: Success via pipeline logs
+    S11->>Disk: Copy Source + Textures + manifest
+    S11->>Disk: Write import_request.json
+    CS->>UE: ImportFromSlug + validate
+    CS->>Disk: Write unity_import_result.json
+    alt validation failed
+        S11->>CLI: unity_import_repair.md
+        CLI->>Agent: agent + MCP
+        Agent->>MCP: unity_* tools
+        MCP->>UE: Fix + re-import
+    end
+    S11-->>W: Success via pipeline logs
 ```
 
-Validated MCP tools: see [`config/workflows/unity_import.md`](config/workflows/unity_import.md).
-
-**Avoid:** `Unity_ImportExternalModel` (rig-only), inline `SaveAndReimport` via `Unity_RunCommand` (blocked by MCP user-interaction guard).
+Workflow prompts: [`unity_import_repair.md`](config/workflows/unity_import_repair.md), [`unity_import_cleanup.md`](config/workflows/unity_import_cleanup.md), [`unity_import.md`](config/workflows/unity_import.md) (manual agent import reference).
 
 ---
 
@@ -402,11 +429,11 @@ Override in `%USERPROFILE%\.asset_assembly_automator\config.yaml`.
 
 | Provider | Integration | Capability |
 |----------|-------------|------------|
-| **Higgsfield** | MCP adapter (`McpHiggsfieldAdapter`) or REST | `generate_image` for concept (workflow + Command Center) |
-| **Magnific** | REST client (`MagnificClient`) | Mystic text-to-image; Creative + Precision V2 upscaler (workflow **Uprez**) |
-| **Midjourney** | Manual + watch-folder import | No API — user generates, watcher imports (Command Center) |
-| **Meshy** | REST client + MCP server | i2d, remesh, rig, animate, download |
-| **Unity** | Cursor CLI → `user-unity-mcp` | Manifest import via workflow app only |
+| **Higgsfield** *(optional)* | MCP adapter (`McpHiggsfieldAdapter`) or REST | `generate_image` for concept — Workflow **Use Higgs** / Command Center `concept_generate`; skip if using MJ drop or Magnific |
+| **Magnific** *(optional)* | REST client (`MagnificClient`) | Mystic text-to-image; Creative + Precision V2 upscaler (workflow **Uprez** + auto stage) |
+| **Midjourney** *(optional)* | Manual + watch-folder import | No API — user generates, watcher imports (Command Center) |
+| **Meshy** *(required for 3D)* | REST client + MCP server | i2d, remesh, rig, animate, download |
+| **Unity 6 + Unity MCP** *(required for import)* | Editor + one MCP bridge | Default AnkleBreaker; Coplay/Official fallbacks; C# happy path + agent repair/cleanup |
 | **Blender ARP** | Stub client | Phase 2 fallback rig |
 
 Meshy exports **separate** rig + per-clip FBXs (not one merged animated FBX). Walk/run are free with rig; custom clips cost 3 credits each.
@@ -513,6 +540,6 @@ git push -u origin main
 
 ## License and version
 
-`asset-assembly-automator` v0.1.0, Python ≥ 3.11, Windows-first (PowerShell launch scripts). See [`pyproject.toml`](pyproject.toml) for package metadata.
+`asset-assembly-automator` v0.2.0, Python ≥ 3.11, Windows-first (PowerShell launch scripts). See [`pyproject.toml`](pyproject.toml) for package metadata.
 
 Licensed under the [MIT License](LICENSE). Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).

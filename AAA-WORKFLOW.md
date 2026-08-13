@@ -1,8 +1,10 @@
 # AAA Workflow — Concept Image → Meshy → FBX → Unity MCP
 
-A focused PyQt app for the character FBX pipeline: generate or drop an approved T-pose concept, run Meshy image-to-3D, export rigged FBX + textures, then trigger a **real Unity import** via the Cursor CLI and Unity MCP.
+A focused PyQt app for Character / Vehicle / Aircraft FBX pipelines: generate or drop an approved concept, optional Magnific uprez, run Meshy, export FBX + textures, then **deterministic Unity import** via the AAA UPM package (AnkleBreaker MCP agent **only on validation failure**).
 
-**In scope:** Concept Image generation (Higgsfield or Magnific Mystic), Magnific Uprez, drag-drop T-pose, Meshy chain, Unity MCP import.
+**In scope:** Approved concept via drag-drop, Midjourney, optional Magnific/Higgsfield generate, Magnific Uprez, Meshy chain, Unity import.
+
+**Required for 3D:** Meshy API key only. Higgsfield MCP is **optional** (still supported for **Use Higgs** / `concept_generate` testing).
 
 **Command Center** (`launch.bat`) still provides the full prompt → concept review → Meshy path for Midjourney + multi-concept approval.
 
@@ -55,16 +57,18 @@ flowchart LR
     end
     subgraph unity [Unity import s11]
         ST[Stage FBXs + manifest]
-        CC[CursorCliClient]
-        AG[Cursor agent]
-        MCP[user-unity-mcp]
+        PKG[com.assetassembly.import]
+        CS[C# ImportFromSlug + Validate]
+        AG[Agent repair on fail]
+        MCP[AnkleBreaker unity]
         ED[Unity Editor]
     end
     CI --> BS
     DZ --> BS
     BS --> MR
     MR --> IP --> I2D --> RM --> RG --> AN --> DL --> QC --> ZIP
-    ZIP --> UI --> ST --> CC --> AG --> MCP --> ED
+    ZIP --> ST --> PKG --> CS --> ED
+    CS -->|fail| AG --> MCP --> CS
 ```
 
 ### Reused from main AAA app
@@ -100,7 +104,7 @@ flowchart LR
 
 1. **Project** — select existing project or use auto-created Default Project.
 2. **Character name** — slugged for output folders; **Save** commits concept or rename.
-3. **Concept Image** — edit T-pose prompt template; **Use Higgs** or **Use Magnific** to generate; **Uprez** to upscale preview (Precision V2 / Creative, 2x–16x).
+3. **Concept Image** — edit prompt; optionally **Use Higgs** (Higgsfield MCP) or **Use Magnific**; or drag-drop / Midjourney import without either provider.
 4. **Drop zone** — alternative: drag PNG/JPG/WEBP T-pose art directly.
 5. **Preview** — generated, uprezzed, or dropped image; click **Save** to write `TPose/CHR_{slug}_TPose_Approved_v01.png`.
 6. **Unity project** — path to Unity project root (saved on `projects.unity_project_path`).
@@ -120,7 +124,7 @@ legs slightly apart, clean silhouette, neutral expression, game-ready HD photo-r
 plain white background, no weapons, no props, no text, no watermark
 ```
 
-Works well with Midjourney, Higgsfield, and Magnific Mystic.
+Works well with Midjourney (manual), Magnific, and optional Higgsfield MCP.
 
 ### Magnific Uprez options
 
@@ -174,72 +178,84 @@ Default workflow skips custom animations.
   Prefabs/
   Controllers/
   unity_import_manifest.json
-  .aaa/unity_import_{slug}.md    # prompt attachment for Cursor CLI
+  .aaa/import_request.json          # C# watcher trigger
+  .aaa/unity_import_result.json     # validation result
+  .aaa/unity_repair_{slug}.md       # repair prompt attachment (on failure)
 ```
 
 ---
 
 ## Unity import model
 
-The PyQt app **cannot** call Unity MCP directly. MCP servers in `~/.cursor/mcp.json` are only available to a Cursor agent.
+The PyQt app **cannot** call Unity MCP directly. MCP servers in `.mcp.json` are only available to a Cursor/Claude agent.
+
+**v0.2 happy path:** deterministic C# via `com.assetassembly.import` UPM package. **AnkleBreaker MCP (`unity` / user-unity)** runs only on validation failure, cleanup, and Diagnostics.
 
 ```mermaid
 sequenceDiagram
     participant UI as Workflow PyQt
     participant S11 as s11_unity_import
     participant FS as Unity project disk
-    participant CLI as cursor-agent
+    participant CS as AaaImportRunner
+    participant CLI as Agent CLI
     participant Agent as Cursor agent
-    participant MCP as user-unity-mcp
+    participant MCP as user-unity
     participant UE as Unity Editor
 
     UI->>S11: Import to Unity
     S11->>FS: Copy FBXs/textures + write manifest
-    S11->>CLI: compose_import_prompt + run_workflow
-    CLI->>Agent: Prompt + unity_import.md
-    Agent->>MCP: Phases 0-4 tool chain
-    MCP->>UE: CharacterManifestImportUtility.ImportFromSlug
-    UE-->>Agent: Prefab + scene placement + patrol
-    Agent-->>CLI: Stream JSON result
-    CLI-->>UI: Pipeline log + metadata
+    S11->>FS: Write import_request.json
+    CS->>UE: ImportFromSlug + validate
+    CS->>FS: Write unity_import_result.json
+    alt validation failed
+        S11->>CLI: unity_import_repair.md
+        CLI->>Agent: agent + MCP
+        Agent->>MCP: unity_* tools
+        MCP->>UE: Fix + re-import
+    end
+    S11-->>UI: Pipeline log + metadata
 ```
 
 ### Flow (step by step)
 
-1. **s11** copies FBX/textures into the Unity project and writes `unity_import_manifest.json` (includes `default_animator_gait: 1`, `no_scripts: false` for `CharacterOvalPatrol`).
-2. **s11** composes a prompt = user guidance + auto-generated Facts block (`compose_import_prompt`).
-3. **`CursorCliClient`** runs:
+1. **s11** injects `com.assetassembly.import`, copies FBX/textures into the Unity project, and writes `unity_import_manifest.json`.
+2. **s11** writes `{slug}/.aaa/import_request.json` — the C# `AaaImportRunner` picks it up in the open Editor.
+3. **AaaImportRunner** calls kind-specific import (`ImportFromSlug` / vehicle / aircraft utilities), validates, and writes `unity_import_result.json`.
+4. If validation fails, **s11** runs agent repair via [`config/workflows/unity_import_repair.md`](config/workflows/unity_import_repair.md) using **AnkleBreaker `unity_*` tools only**.
+5. After repair, **s11** re-triggers C# import once and re-reads `unity_import_result.json`.
 
-```text
-cursor-agent -p --force --output-format stream-json --stream-partial-output [--model MODEL] "<prompt>"
-```
+### Agent repair tools (AnkleBreaker)
 
-4. The Cursor agent uses **`user-unity-mcp`** (Unity AI MCP) — not `user-unityMCP` — to execute the validated tool chain in [`config/workflows/unity_import.md`](config/workflows/unity_import.md).
+| Step | MCP tools | Outcome |
+|------|-----------|---------|
+| Preflight | `unity_editor_ping`, `unity_editor_state`, `unity_console_log` | Editor reachable; not compiling |
+| Fix | `unity_execute_code`, `unity_execute_menu_item` | Re-run `ImportFromSlug` or fix reported validator issues |
+| Verify | `unity_asset_list`, `unity_gameobject_info`, `unity_component_get_properties` | Prefab + Animator + patrol/controller present |
 
-### What the agent does (validated)
+Manual agent import reference (Workflow prompt editor): [`config/workflows/unity_import.md`](config/workflows/unity_import.md).
 
-| Phase | MCP tools | Outcome |
-|-------|-----------|---------|
-| 0 Preflight | `Unity_ManageEditor` GetState, `Unity_GetConsoleLogs` | Wait for compile; baseline console |
-| 1 Import | `Unity_ManageMenuItem` Execute manifest menu **or** `Unity_RunCommand` → `ImportFromSlug` | Humanoid rig, clips, controller, material, prefab |
-| 2 Cleanup | `Unity_ManageGameObject` delete, `Unity_ManageAsset` Delete | Remove quick-import duplicates / `ExternalModels` |
-| 3 Verify | `Unity_ListResources`, `Unity_ManageGameObject` get_components, `Unity_RunCommand` | Animator + `CharacterOvalPatrol`; clip lengths |
-| 4 Play | `Unity_ManageScene` Save, `Unity_ManageEditor` Play | Oval walk on terrain |
+Cleanup prompt: [`config/workflows/unity_import_cleanup.md`](config/workflows/unity_import_cleanup.md) — **Remove from Unity**; uses one `unity_execute_code` returning `SUCCESS`.
 
 ### Unity project prerequisites (one-time)
 
 | Asset | Role |
 |-------|------|
-| `Assets/Editor/CharacterManifestImportUtility.cs` | Manifest-driven import (`ImportFromSlug`) |
-| `Assets/Scripts/CharacterOvalPatrol.cs` | Oval patrol; sets `Gait=1` (Walk) |
+| `Packages/com.assetassembly.import` | Injected UPM package — import utilities, validators, patrol/controllers |
+| Open Unity 6 Editor | Required while import/repair runs |
+
+**Required for 3D:** Meshy API key only. **Unity 6 + AnkleBreaker MCP** are **required** for `unity_import`, cleanup, and Diagnostics (see below).
 
 ### Prerequisites (host machine)
 
-- [Cursor CLI](https://cursor.com/docs/cli/headless) installed (`cursor-agent` on PATH)
-- `cursor-agent login` or `CURSOR_API_KEY` set
-- **`user-unity-mcp`** configured and connected in Cursor MCP settings
-- **Unity Editor open** on the target project with MCP bridge active
-- Unity project path set in the workflow app
+| Requirement | Notes |
+|-------------|-------|
+| **Unity 6 Editor** | Install via Unity Hub; keep target project **open** during import/repair |
+| **AnkleBreaker Unity MCP** (default) | Server **`unity`** (Cursor: **user-unity**). Copy [`mcp.json.example`](mcp.json.example) → `.mcp.json` |
+| **Coplay / Official** (fallbacks) | Set **Settings → Unity MCP bridge**; enable matching server in Cursor MCP |
+| **Cursor or Claude CLI** | Agent repair + Diagnostics ping (`cursor-agent` or `claude` on PATH) |
+| **Unity project path** | Set in Workflow app (`projects.unity_project_path`) |
+
+- [Cursor CLI](https://cursor.com/docs/cli/headless) — `cursor-agent login` or `CURSOR_API_KEY` for repair workflows
 
 ### Config (`config/default.yaml`)
 
@@ -256,14 +272,11 @@ cursor_cli:
 
 ## Default Unity import prompt
 
-Loaded from [`config/workflows/unity_import.md`](config/workflows/unity_import.md). Key points:
+Loaded from [`config/workflows/unity_import_repair.md`](config/workflows/unity_import_repair.md) on validation failure. Key points:
 
-- MCP server: **`user-unity-mcp`** (Unity AI MCP)
-- Import via `CharacterManifestImportUtility.ImportFromSlug` — **not** inline `SaveAndReimport` scripts (MCP blocks user-interaction dialogs)
-- **Do not** use `Unity_ImportExternalModel` for rigged characters (rig-only quick import)
-- Animator: `Gait` int (`0=Idle`, `1=Walk`, `2=Run`); default state **Walk**
-- `CharacterOvalPatrol` attached on prefab/scene instance
-- Meshy zips typically include Walk + Run only; Idle uses frozen walk pose
+- MCP server: configured bridge from Facts (**default: AnkleBreaker `unity` / user-unity**)
+- Fallback bridges: **Coplay `user-unityMCP`**, **Official `user-unity-mcp`** — tool mapping in appended Facts
+- Do **not** re-download Meshy assets; fix validator failures only
 
 Cleanup prompt: [`config/workflows/unity_import_cleanup.md`](config/workflows/unity_import_cleanup.md) — used by **Remove from Unity**.
 
@@ -273,7 +286,7 @@ Edit the import prompt in the UI before **Import to Unity** to add project-speci
 
 ## Limitations
 
-- Unity MCP must be healthy in Cursor settings (`user-unity-mcp` connected; `user-unityMCP` is a separate bridge).
+- Unity MCP must be healthy in Cursor settings — **one** bridge active. Default **AnkleBreaker `unity` / user-unity**; Coplay and Official supported via Settings → Unity MCP bridge.
 - Cursor CLI runs a full agent turn — requires auth and may take several minutes.
 - Python does not invoke Unity MCP APIs directly; failures in the agent step require checking pipeline logs and Unity console.
 - MCP connection may drop during Play mode — stop Play before further MCP calls.
@@ -295,4 +308,5 @@ Edit the import prompt in the UI before **Import to Unity** to add project-speci
 - [`README.md`](README.md) — full AAA PyQt app overview with architecture diagrams
 - [`ASSET-ASSEMBLY-AUTOMATOR.md`](ASSET-ASSEMBLY-AUTOMATOR.md) — full product spec
 - [`AGENTS.md`](AGENTS.md) — agent guardrails and Meshy invariants
-- [`config/workflows/unity_import.md`](config/workflows/unity_import.md) — Unity MCP import prompt (source of truth)
+- [`config/workflows/unity_import.md`](config/workflows/unity_import.md) — manual agent import reference (AnkleBreaker `unity_*` tools)
+- [`config/workflows/unity_import_repair.md`](config/workflows/unity_import_repair.md) — validation-failure repair prompt

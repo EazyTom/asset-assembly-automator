@@ -1,8 +1,8 @@
 # Asset Assembly Automator (AAA)
 
-**Version 0.1.0** — Python + PyQt6 orchestrator for the Midjourney/Higgsfield → Meshy → FBX.zip character pipeline.
+**Version 0.2.0** — Python + PyQt6 orchestrator for Character / Vehicle / Aircraft pipelines (approved concept → optional Magnific uprez → Meshy 7 → FBX.zip → Unity).
 
-Automates concept art generation (Higgsfield), manual-assisted Midjourney compare, Meshy image-to-3D, remesh-to-budget, rig, custom animations, download, QC, and Unity-ready zip export. **Unity MCP import** is implemented for the Meshy Workflow app (`s11`); worldbuilding stages remain Phase 2 stubs.
+Automates concept intake from **Midjourney, Magnific, or optional Higgsfield** (any approved PNG is fine), optional **Magnific auto-uprez**, Meshy **Quality (meshy-7 8K)** or **Game-ready (smart-topology)** presets, optional remesh (default off), rig/animate (characters only), QC, zip export, and **deterministic Unity import** via `com.assetassembly.import` UPM package. **AnkleBreaker MCP / agent CLI runs only when C# validation fails.**
 
 ### Documentation map
 
@@ -12,7 +12,9 @@ Automates concept art generation (Higgsfield), manual-assisted Midjourney compar
 | [AAA-WORKFLOW.md](AAA-WORKFLOW.md) | Meshy Workflow app + Unity MCP import chain |
 | **ASSET-ASSEMBLY-AUTOMATOR.md** (this file) | Product spec — stages, CLI, config, providers |
 | [AGENTS.md](AGENTS.md) | AI agent guardrails |
-| [config/workflows/unity_import.md](config/workflows/unity_import.md) | Unity MCP import prompt (agent source of truth) |
+| [config/workflows/unity_import_repair.md](config/workflows/unity_import_repair.md) | AnkleBreaker repair prompt (validation failure) |
+| [config/workflows/unity_import_cleanup.md](config/workflows/unity_import_cleanup.md) | AnkleBreaker cleanup prompt (Remove from Unity) |
+| [config/workflows/unity_import.md](config/workflows/unity_import.md) | Manual agent import reference (`unity_*` tools) |
 
 ---
 
@@ -39,6 +41,16 @@ Set Meshy API key via GUI **Settings** or `%USERPROFILE%\.asset_assembly_automat
 MESHY_API_KEY=your_key_here
 ```
 
+### Required for Unity import (`s11`)
+
+| Dependency | Notes |
+|------------|-------|
+| **Unity 6 Editor** | Target project open while import runs |
+| **Unity MCP** (one bridge) | Default **AnkleBreaker** `unity` / **user-unity**; Coplay/Official fallbacks in Settings |
+| **Agent CLI** | `cursor-agent` or Claude CLI (Settings) |
+
+See [`mcp.json.example`](mcp.json.example) and **Settings → Unity MCP bridge**. Workflow prompts default to AnkleBreaker `unity_*` tools with fallback tool mapping appended.
+
 ---
 
 ## Architecture
@@ -64,7 +76,7 @@ flowchart TD
     subgraph phase2 [Phase 2 optional]
         UI[unity_import s11]
         CUR[Cursor CLI agent]
-        MCP[user-unity-mcp]
+        MCP[user-unity]
     end
     PB --> CG --> CR --> IP
     IP --> TA --> I2D
@@ -99,8 +111,8 @@ flowchart TD
 | Stage | CLI module | Manual gate? | Notes |
 |-------|------------|--------------|-------|
 | `prompt_build` | `s01_prompt_build` | No | Renders MJ/HF/Meshy prompts from YAML templates |
-| `concept_generate` | `s02_concept_generate` | No | Higgsfield MCP adapter (fake in dry-run) |
-| `concept_review` | `s03_concept_review` | **Yes** | Approve MJ or HF concept → T-pose PNG |
+| `concept_generate` | `s02_concept_generate` | No | **Optional** Higgsfield MCP/REST (fake in dry-run). Skip when using Midjourney import or manual PNG at review |
+| `concept_review` | `s03_concept_review` | **Yes** | Approve concept PNG (any provider) → approved image for prep/Magnific |
 | `image_prep` | `s04_image_prep` | No | T-pose checklist, optional crop |
 | `turnaround` | `s04b_turnaround` | No | Opt-in multi-view for `multi-image-to-3d` |
 | `meshy_i2d` | `s05_meshy_image_to_3d` | No | t-pose, quad, PBR, FBX+GLB |
@@ -110,7 +122,8 @@ flowchart TD
 | `meshy_download` | `s09_meshy_download` | No | Downloads rig + clips + textures |
 | `meshy_qc` | `s09b_qc_validate` | No | Polycount / file presence gate |
 | `package_export` | `s10_package_export` | No | FBX.zip + `pipeline_manifest.json` |
-| `unity_import` | `s11_unity_import` | No | Stage FBXs into Unity project; Cursor CLI → `user-unity-mcp` (**Workflow app only**) |
+| `unity_import` | `s11_unity_import` | No | UPM package + C# watcher; agent repair on validation failure only |
+| `magnific_uprez` | `s04c_magnific_uprez` | No | Auto Magnific upscale after concept approval (skippable) |
 
 Run a single stage:
 
@@ -216,7 +229,7 @@ Unity workflows: `config/workflows/unity_import.md`, `unity_import_cleanup.md`
   pipeline_manifest.json
 ```
 
-Meshy does **not** export one merged animated FBX. The zip contains separate rig + clip FBXs for Unity Humanoid setup. Import automation runs via `s11` + Cursor agent + `user-unity-mcp` (see [AAA-WORKFLOW.md](AAA-WORKFLOW.md)).
+Meshy does **not** export one merged animated FBX. The zip contains separate rig + clip FBXs for Unity Humanoid setup. Import runs via `s11` C# watcher + optional AnkleBreaker agent repair (see [AAA-WORKFLOW.md](AAA-WORKFLOW.md)).
 
 ---
 
@@ -257,7 +270,7 @@ Produces `dist/AssetAssemblyAutomator/` one-folder PyInstaller build.
 
 | Feature | Status |
 |---------|--------|
-| `unity_import` (`s11`) | **Implemented** — runnable from Meshy Workflow app via Cursor CLI + `user-unity-mcp`; not auto-run from Command Center |
+| `unity_import` (`s11`) | **Implemented** — C# UPM import + AnkleBreaker repair on failure; Workflow app; not auto-run from Command Center |
 | `world_concept`, `world_i2d`, `world_remesh`, `world_export` | Schema + GUI stub only |
 | Blender + Auto-Rig Pro | `clients/blender_arp_client.py` fallback rig — not wired to runner |
 
@@ -271,12 +284,13 @@ See `midjourney_meshy_unity_mcp_character_workflow.md` for the full proven workf
 
 | Provider | Capability |
 |----------|------------|
-| Higgsfield | `generate_image` via MCP adapter |
-| Midjourney | Manual + watch folder import |
-| Meshy | Full REST pipeline (i2d, remesh, rig, animate, download) |
-| Unity | Cursor CLI agent → **`user-unity-mcp`** → `CharacterManifestImportUtility` (Workflow app trigger) |
+| **Meshy** *(required for 3D)* | Full REST pipeline (i2d, remesh, rig, animate, download) |
+| **Unity 6 + Unity MCP** *(required for import)* | Editor + one bridge; default AnkleBreaker; Coplay/Official fallbacks |
+| Midjourney *(optional)* | Manual + watch folder import |
+| Magnific *(optional)* | Mystic generate + upscaler (workflow + auto stage) |
+| Higgsfield *(optional)* | `generate_image` via MCP/REST — Command Center `concept_generate` / Workflow **Use Higgs** |
 
-Unity import details: [config/workflows/unity_import.md](config/workflows/unity_import.md).
+**Unity MCP:** Default **AnkleBreaker** (`unity` / user-unity). Fallbacks: **Coplay** (`user-unityMCP`), **Official** (`user-unity-mcp`) — Settings → Unity MCP bridge or `unity_mcp.bridge` in config. Prompts: [`unity_import_repair.md`](config/workflows/unity_import_repair.md), [`unity_import_cleanup.md`](config/workflows/unity_import_cleanup.md), [`unity_import.md`](config/workflows/unity_import.md).
 
 ---
 

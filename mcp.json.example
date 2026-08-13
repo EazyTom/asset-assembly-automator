@@ -1,4 +1,5 @@
 {
+  "_comment": "Copy to .mcp.json at repo root (gitignored). AAA defaults to AnkleBreaker (unity/user-unity). Coplay + Official Unity MCP are supported fallbacks — enable ONE bridge at a time. Unity 6 Editor open on target project.",
   "mcpServers": {
     "meshy-mcp-server": {
       "command": "npx",
@@ -9,6 +10,29 @@
       "env": {
         "MESHY_API_KEY": "your_meshy_api_key_here"
       }
+    },
+    "unity": {
+      "_comment": "DEFAULT — AnkleBreaker (Cursor: user-unity). Match Settings → Unity MCP bridge = AnkleBreaker.",
+      "command": "node",
+      "args": [
+        "D:\\Repos\\unity-mcp-server\\src\\index.js"
+      ],
+      "env": {
+        "UNITY_HUB_PATH": "C:\\Program Files\\Unity Hub\\Unity Hub.exe",
+        "UNITY_BRIDGE_PORT": "7890"
+      }
+    },
+    "unityMCP": {
+      "_comment": "FALLBACK — Coplay Unity MCP (Cursor: user-unityMCP). Disable unity block when using this.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@coplaydev/unity-mcp@latest"
+      ]
+    },
+    "unity-mcp": {
+      "_comment": "FALLBACK — Official Unity AI MCP (Cursor: user-unity-mcp). Requires Unity AI Assistant package.",
+      "url": "http://127.0.0.1:8080/mcp"
     }
   }
 }

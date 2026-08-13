@@ -85,6 +85,32 @@ def chr_file_prefix(character_slug: str) -> str:
     return f"CHR_{character_slug}"
 
 
+def asset_file_prefix(asset_kind: str, slug: str) -> str:
+    if asset_kind == "vehicle":
+        return f"VEH_{slug}"
+    if asset_kind == "aircraft":
+        return f"AIR_{slug}"
+    return chr_file_prefix(slug)
+
+
+def approved_folder_name(asset_kind: str) -> str:
+    if asset_kind == "character":
+        return "TPose"
+    return "Approved"
+
+
+def approved_concept_path(dirs: dict[str, Path], slug: str, asset_kind: str = "character") -> Path:
+    folder_key = "tpose" if asset_kind == "character" else "approved"
+    if folder_key == "approved" and "approved" not in dirs:
+        approved_dir = dirs["root"] / approved_folder_name(asset_kind)
+        return approved_dir / f"{asset_file_prefix(asset_kind, slug)}_Approved_v01.png"
+    prefix = asset_file_prefix(asset_kind, slug)
+    if asset_kind == "character":
+        return dirs["tpose"] / f"{prefix}_TPose_Approved_v01.png"
+    approved_dir = dirs.get("approved") or (dirs["root"] / "Approved")
+    return approved_dir / f"{prefix}_Approved_v01.png"
+
+
 def project_output_root(project: Project) -> Path:
     """Project-level output root (used when no character is selected)."""
     return Path(project.output_root) / project_output_slug(project)
@@ -135,7 +161,8 @@ def ensure_pipeline_output_slug(db: Database, pipeline_id: int) -> str:
 
 def get_output_dirs_for(project: Project, pipe: Pipeline) -> dict[str, Path]:
     root = character_output_root(project, pipe)
-    return {
+    kind = getattr(pipe, "asset_kind", None) or pipe.metadata.get("asset_kind") or "character"
+    dirs = {
         "root": root,
         "concept": root / "Concept",
         "tpose": root / "TPose",
@@ -144,6 +171,9 @@ def get_output_dirs_for(project: Project, pipe: Pipeline) -> dict[str, Path]:
         "textures": root / "Textures",
         "previews": root / "Previews",
     }
+    if kind != "character":
+        dirs["approved"] = root / "Approved"
+    return dirs
 
 
 def get_output_dirs(db: Database, pipeline_id: int) -> dict[str, Path]:

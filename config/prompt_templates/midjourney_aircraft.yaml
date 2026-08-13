@@ -1,0 +1,6 @@
+name: midjourney_aircraft
+defaults:
+  aspect: "16:9"
+template: |
+  {subject}, aircraft concept art, side or 3/4 orthographic view, clean silhouette,
+  studio lighting, no character, no t-pose, game-ready reference sheet --ar {aspect} --v 6.1

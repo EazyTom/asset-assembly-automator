@@ -43,6 +43,7 @@ STAGE_MODULE_MAP = {
     StageId.PROMPT_BUILD: "asset_assembly_automator.stages.s01_prompt_build",
     StageId.CONCEPT_GENERATE: "asset_assembly_automator.stages.s02_concept_generate",
     StageId.CONCEPT_REVIEW: "asset_assembly_automator.stages.s03_concept_review",
+    StageId.MAGNIFIC_UPREZ: "asset_assembly_automator.stages.s04c_magnific_uprez",
     StageId.IMAGE_PREP: "asset_assembly_automator.stages.s04_image_prep",
     StageId.TURNAROUND: "asset_assembly_automator.stages.s04b_turnaround",
     StageId.MESHY_I2D: "asset_assembly_automator.stages.s05_meshy_image_to_3d",
