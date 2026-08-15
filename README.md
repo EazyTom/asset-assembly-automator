@@ -2,14 +2,16 @@
 
 ![AAA screenshot](AAA-screenshot-202.png)
 
-**Version 0.2.0** — Python + PyQt6 orchestrator for Character / Vehicle / Aircraft pipelines: approved concept (Midjourney drop, Magnific, or optional Higgsfield) → Meshy 7 → FBX.zip → deterministic Unity import.
+**Version 0.2.0** — Python + PyQt6 orchestrator for **Character / Vehicle / Aircraft** pipelines: approved concept (Midjourney drop, Magnific, or optional Higgsfield) → optional Magnific uprez → Meshy **Quality (meshy-7)** or **Game-ready** → FBX.zip → **deterministic Unity import** (`com.assetassembly.import` UPM; agent/MCP **only on validation failure**).
+
+Enhancement track and capability catalog: [`docs/ENHANCEMENTS.md`](docs/ENHANCEMENTS.md).
 
 Two GUI entry points share the same SQLite database, stage modules, and provider clients:
 
 | App | Launch | Scope |
 |-----|--------|-------|
 | **Command Center** | `.\launch.bat` or `aaa-gui` | Full pipeline: prompts, concept review, Meshy, export |
-| **Meshy Workflow** | `.\launch-workflow.bat` or `aaa-workflow` | **Concept Image** (generate or drop T-pose) → Meshy → Unity MCP import |
+| **Meshy Workflow** | `.\launch-workflow.bat` or `aaa-workflow` | Concept → Meshy → **Import to Unity** (`s11` C# happy path) |
 
 ---
 
@@ -46,8 +48,8 @@ Legacy fallback: repo-root `meshy-api.key` / `magnific-api.key` (gitignored — 
 |------------|--------------|-------|
 | **Meshy API key** | Meshy stages → FBX.zip | Only paid API for the 3D chain |
 | **Unity 6 Editor** | `s11` unity_import | Target project open during import |
-| **Unity MCP** (one bridge) | Agent repair, cleanup, Diagnostics | Default **AnkleBreaker** `unity` / **user-unity**; Coplay and Official fallbacks supported (Settings → Unity MCP bridge) |
-| **Cursor or Claude CLI** | Agent repair + Diagnostics ping | Settings → Agent for Unity repair |
+| **Unity MCP** (one bridge) | Repair, cleanup, Diagnostics — **not** happy-path import | Default **AnkleBreaker** `unity` / **user-unity**; Coplay and Official fallbacks (Settings → Unity MCP bridge) |
+| **Cursor or Claude CLI** | Agent repair + Diagnostics ping only | Settings → Agent for Unity repair; never used on successful C# import |
 
 ### Unity MCP — default AnkleBreaker, fallbacks supported
 
@@ -114,14 +116,14 @@ flowchart TB
         AW[ArtifactWatcher]
     end
     subgraph stages [Stage modules s01-s11]
-        S1[prompt / concept]
+        S1[prompt / concept / magnific]
         S2[image_prep under 20MB]
         S3[meshy chain]
         S4[unity import s11]
     end
     subgraph data [Persistence]
         DB[(SQLite aaa.db)]
-        OUT[Character output folders]
+        OUT[Characters Vehicles Aircraft output]
         LOG[JSONL pipeline logs]
     end
     subgraph external [External services]
@@ -129,7 +131,8 @@ flowchart TB
         MAG[Magnific REST API]
         MJ[Midjourney manual]
         MS[Meshy REST API]
-        CUR[Cursor CLI agent]
+        CS[AaaImportRunner C#]
+        CUR[Agent CLI repair only]
         UMC[user-unity AnkleBreaker]
         UE[Unity Editor]
     end
@@ -148,36 +151,37 @@ flowchart TB
     WW --> MAG
     S1 --> MJ
     S3 --> MS
-    S4 --> CUR --> UMC --> UE
+    S4 --> CS --> UE
+    S4 -.->|validation fail| CUR --> UMC --> UE
     AW --> PC
     RS --> PR
 ```
 
 ---
 
-## Full character pipeline
+## Full pipeline (Character / Vehicle / Aircraft)
 
 ```mermaid
 flowchart TD
     subgraph concept [Concept phase]
         PB[prompt_build s01]
         CG[concept_generate s02 optional]
-        CR[concept_review s03 MANUAL GATE preview]
+        CR[concept_review s03 MANUAL GATE]
         UP[magnific_uprez s04c after approval]
         IP[image_prep s04 resize under 20MB]
         TA[turnaround s04b optional]
     end
     subgraph meshy [Meshy phase]
-        I2D[meshy_i2d s05]
-        RM[meshy_remesh s06]
-        RG[meshy_rig s07]
-        AN[meshy_animate s08]
+        I2D[meshy_i2d s05 Quality or Game-ready]
+        RM[meshy_remesh s06 optional default off]
+        RG[meshy_rig s07 character only]
+        AN[meshy_animate s08 character only]
         DL[meshy_download s09]
         QC[meshy_qc s09b]
         ZIP[package_export s10]
     end
-    subgraph phase2 [Phase 2 optional]
-        UI[unity_import s11]
+    subgraph unity [Unity import v0.2]
+        UI[unity_import s11 C# UPM]
     end
     PB --> CR
     CG -.-> CR
@@ -185,14 +189,19 @@ flowchart TD
     IP --> TA
     IP --> I2D
     TA --> I2D
-    I2D --> RM --> RG --> AN --> DL --> QC --> ZIP
+    I2D --> RM
+    RM -->|character| RG --> AN --> DL
+    RM -->|vehicle or aircraft| DL
+    DL --> QC --> ZIP
     ZIP --> COMPLETE[complete]
-    ZIP -.-> UI
+    ZIP -.->|Workflow Import to Unity| UI
 ```
+
+**Asset kinds:** `character` (rig + animate), `vehicle` / `aircraft` (skip rig/animate). **Remesh** optional, default **off**. **Presets:** Quality (`meshy-7`, 8K) vs Game-ready (`smart-topology`).
 
 **Manual gate (Command Center):** `concept_review` stops auto-run so you can **preview native** Midjourney / drop / optional Higgs or Magnific generate images. Approve, then Magnific uprez runs, then Meshy.
 
-**Meshy Workflow app** previews first, **Save** approves, then **Run Meshy** starts at `magnific_uprez` (if enabled) → `image_prep` → `meshy_i2d` … → `unity_import`.
+**Meshy Workflow app** previews first, **Save** approves, then **Run Meshy** starts at `magnific_uprez` (if enabled) → `image_prep` → `meshy_i2d` … → optional **Import to Unity** (`s11`).
 
 ---
 
@@ -280,34 +289,41 @@ Optional: set `meshy.use_hires_texture_image: true` in user config to pass the h
 
 ## Unity import chain (s11)
 
-Python stages files; **deterministic C# import** runs in Unity; AnkleBreaker MCP is used only for repair, cleanup, and Diagnostics.
+Python injects the AAA UPM package and stages files; **deterministic C#** (`AaaImportRunner`) does import + validate in the open Unity 6 Editor. **Agent / AnkleBreaker MCP runs only on validation failure**, plus cleanup and Diagnostics. Animator controllers are **created in the target project by C#** — not copied from another Unity project. AAA does **not** depend on any external game project (e.g. XR Pipeline) for import tooling — see [`docs/ENHANCEMENTS.md`](docs/ENHANCEMENTS.md#ownership-aaa-package-vs-xr-pipeline).
 
 ```mermaid
 sequenceDiagram
     participant W as WorkflowWindow
     participant S11 as s11_unity_import
-    participant Disk as Unity Assets/Characters/slug
+    participant Disk as Unity Packages plus Assets
     participant CS as AaaImportRunner C#
     participant CLI as Agent CLI
-    participant Agent as Cursor agent
+    participant Agent as Cursor_or_Claude
     participant MCP as user-unity
     participant UE as Unity Editor
 
     W->>S11: Import to Unity
-    S11->>Disk: Copy Source + Textures + manifest
+    S11->>Disk: Inject com.assetassembly.import
+    S11->>Disk: Stage FBX textures manifest
     S11->>Disk: Write import_request.json
-    CS->>UE: ImportFromSlug + validate
+    CS->>UE: ImportFromSlug plus Validate
     CS->>Disk: Write unity_import_result.json
     alt validation failed
         S11->>CLI: unity_import_repair.md
-        CLI->>Agent: agent + MCP
+        CLI->>Agent: agent plus MCP
         Agent->>MCP: unity_* tools
-        MCP->>UE: Fix + re-import
+        MCP->>UE: Fix then re-validate C#
     end
     S11-->>W: Success via pipeline logs
 ```
 
-Workflow prompts: [`unity_import_repair.md`](config/workflows/unity_import_repair.md), [`unity_import_cleanup.md`](config/workflows/unity_import_cleanup.md), [`unity_import.md`](config/workflows/unity_import.md) (manual agent import reference).
+| Kind | Unity folder | Runtime | Animator |
+|------|--------------|---------|----------|
+| Character | `Assets/Characters/{slug}/` | `CharacterOvalPatrol` | Built by C# (`CreateAnimatorControllerAtPath`) |
+| Vehicle | `Assets/Vehicles/{slug}/` | `DriveController` | N/A |
+| Aircraft | `Assets/Aircraft/{slug}/` | `FlightController` | N/A |
+
+Workflow prompts: [`unity_import_repair.md`](config/workflows/unity_import_repair.md) (failure), [`unity_import_cleanup.md`](config/workflows/unity_import_cleanup.md), [`unity_import.md`](config/workflows/unity_import.md) (manual agent import / fallback).
 
 ---
 
@@ -330,6 +346,7 @@ erDiagram
         int id PK
         int project_id FK
         string asset_name
+        string asset_kind
         string current_stage
         json metadata
     }
@@ -337,6 +354,7 @@ erDiagram
         int id PK
         string stage_name
         string status
+        int duration_ms
         string error_message
     }
     external_jobs {
@@ -361,25 +379,32 @@ erDiagram
 ```
 asset_assembly_automator/
 ├── cli.py                 # aaa CLI entry
-├── core/                  # config, db, logging, state_machine, secrets
-├── clients/               # meshy, higgsfield, magnific, cursor_cli, image_prep
+├── core/                  # config, db, logging, state_machine, secrets, timing
+├── clients/               # meshy, higgsfield, magnific, cursor_cli, agent_cli, image_prep
 ├── stages/                # s01 … s11 async stage modules
 ├── orchestrator/          # runner, resume, watchers
-├── workflow/              # bootstrap, unity_mcp_workflow, templates
+├── workflow/              # bootstrap, unity helpers/poll/MCP prompts
 └── gui/
     ├── main.py            # Command Center
-    ├── workflow_main.py   # Meshy Workflow (Concept Image + Meshy + Unity)
+    ├── workflow_main.py   # Meshy Workflow (Concept + Meshy + Unity)
     ├── controller.py      # PipelineController signals + tasks
     ├── views/             # dashboard, wizard, concept, logs, …
     ├── widgets/           # drop_zone, pipeline_stepper, character_preview_panel, …
-    ├── dialogs/           # settings, meshy_cost, provider_cost, new pipeline
+    ├── dialogs/           # settings, diagnostics, meshy_cost, provider_cost
     └── theme/             # dark.qss, status colors
 
+unity_package/com.assetassembly.import/   # UPM: Editor + Runtime C# (injected into target)
+unity_templates/                          # Legacy Assets/ fallback if package missing
+docs/
+├── ENHANCEMENTS.md        # v0.2 capability catalog + locked decisions
+└── DB-TIMING.md           # duration_ms / pipeline_timing_stats
+
 config/
-├── default.yaml           # meshy, magnific, higgsfield defaults
+├── default.yaml           # meshy, magnific, agent_cli, unity_mcp
 ├── prompt_templates/
 └── workflows/
-    ├── unity_import.md
+    ├── unity_import.md            # Manual agent import reference
+    ├── unity_import_repair.md     # Validation-failure repair
     └── unity_import_cleanup.md
 
 secrets.env.example        # Template for API keys (copy to user profile)
@@ -421,10 +446,11 @@ flowchart LR
 
 | Section | Notable keys |
 |---------|----------------|
-| **meshy** | Poly budgets (300k default), HD textures, `i2d_max_image_px` (4096), `i2d_max_image_mb` (18, hard-capped at 20), `use_hires_texture_image` (false) |
-| **magnific** | `mystic_model` (super_real), `resolution` (2k), `aspect_ratio` (portrait_2_3), upscale mode/scale/flavor |
+| **meshy** | `default_preset` (quality), `ai_model` (meshy-7), `default_texture_resolution` (8k), `image_enhancement`, `should_remesh` (false on i2d), poly budgets (300k), `i2d_max_image_px` (4096), `i2d_max_image_mb` (18), `max_concurrent_jobs` |
+| **magnific** | `default_enabled`, `mystic_model`, upscale mode/scale/flavor, `max_concurrent_jobs` |
 | **higgsfield** | `provider` (mcp), `default_image_model` (soul_2), aspect ratio 2:3 |
-| **cursor_cli** | `command`, `timeout_seconds`, optional `model` |
+| **cursor_cli** / **agent_cli** | Repair/ping only; `provider` cursor\|claude |
+| **unity_mcp** | `bridge`: anklebreaker (default) \| coplay \| official |
 
 Override in `%USERPROFILE%\.asset_assembly_automator\config.yaml`.
 
@@ -457,6 +483,8 @@ Auth header: `x-magnific-api-key`. Tasks are async — client polls until `COMPL
 
 ## Output layout
 
+Characters (vehicles/aircraft use `Vehicles/` / `Aircraft/`, `VEH_` / `AIR_` prefixes, and `Approved/` instead of `TPose/`):
+
 ```
 {output_root}/Characters/{slug}/
   Concept/                 # Generated concepts (Higgs/Magnific staging)
@@ -476,12 +504,15 @@ Auth header: `x-magnific-api-key`. Tasks are async — client polls until `COMPL
   logs/{pipeline_id}/pipeline.jsonl
 ```
 
-Unity staging (`s11`):
+Unity (`s11`) — package inject + content staging:
 
 ```
-{unity_project}/Assets/Characters/{slug}/
+{unity_project}/Packages/com.assetassembly.import/   # AAA UPM (Editor + Runtime)
+{unity_project}/Assets/Characters/{slug}/            # or Vehicles/ / Aircraft/
   Source/  Textures/  Animations/  Materials/  Prefabs/  Controllers/
   unity_import_manifest.json
+  .aaa/import_request.json
+  .aaa/unity_import_result.json
 ```
 
 ---
@@ -524,10 +555,13 @@ git push -u origin main
 |-----|----------|
 | **README.md** (this file) | Developers — architecture, GUIs, pipelines, GitHub setup |
 | [ASSET-ASSEMBLY-AUTOMATOR.md](ASSET-ASSEMBLY-AUTOMATOR.md) | Product spec and stage reference |
-| [AAA-WORKFLOW.md](AAA-WORKFLOW.md) | Meshy Workflow app + Concept Image + Unity MCP import |
+| [AAA-WORKFLOW.md](AAA-WORKFLOW.md) | Meshy Workflow app + Concept Image + Unity import |
+| [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md) | v0.2 capability catalog, locked decisions, UPM ownership |
+| [docs/DB-TIMING.md](docs/DB-TIMING.md) | Stage `duration_ms` and `pipeline_timing_stats` |
 | [AGENTS.md](AGENTS.md) | AI agent guardrails and logging contract |
-| [config/workflows/unity_import.md](config/workflows/unity_import.md) | Unity MCP import prompt (agent source of truth) |
-| [midjourney_meshy_unity_mcp_character_workflow.md](midjourney_meshy_unity_mcp_character_workflow.md) | End-to-end proven workflow notes |
+| [config/workflows/unity_import_repair.md](config/workflows/unity_import_repair.md) | Agent repair prompt (validation failure) |
+| [config/workflows/unity_import.md](config/workflows/unity_import.md) | Manual agent import reference / fallback |
+| [midjourney_meshy_unity_mcp_character_workflow.md](midjourney_meshy_unity_mcp_character_workflow.md) | Legacy end-to-end notes (prefer ENHANCEMENTS + AAA-WORKFLOW) |
 
 ---
 
@@ -535,11 +569,13 @@ git push -u origin main
 
 | Feature | Status |
 |---------|--------|
-| `unity_import` (s11) | Runnable from Workflow app via Cursor CLI |
+| `unity_import` (s11) | **v0.2 implemented** — C# UPM happy path + agent repair on failure; Workflow app; not auto-chained from Command Center |
 | Concept Image (Magnific/Higgs in workflow) | **Implemented** in `workflow_main.py` |
+| Asset kinds vehicle / aircraft | **Implemented** — skip rig/animate; kind-specific Unity utilities |
 | World pipeline stages | Schema + GUI stub only |
 | Blender + Auto-Rig Pro | Client stub; not wired to runner |
-| Main app auto Unity import | Not triggered — use Workflow app |
+| Command Center auto Unity import | Not triggered — use Workflow app |
+| Agent-authored C# / controllers | **Out of scope** — AAA package owns import tooling |
 
 ---
 
