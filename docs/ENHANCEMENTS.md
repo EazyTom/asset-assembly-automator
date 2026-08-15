@@ -13,7 +13,7 @@ Durable spec for the v0.2 enhancement track. See the implementation plan for ful
 | **Asset kinds** | `character` / `vehicle` / `aircraft` on `pipelines`; branched stage graph (vehicles/aircraft skip rig/animate) |
 | **Meshy presets** | Quality (`meshy-7`, 8K) vs Game-ready (`smart-topology`); GUI + config |
 | **Remesh** | Optional; **default off**; skip when disabled |
-| **Magnific** | Auto stage `magnific_uprez` + Workflow **Uprez** button |
+| **Magnific** | Auto stage `magnific_uprez` **after concept approval** (preview native first) |
 | **Concept intake** | Midjourney drop, Magnific, optional Higgsfield; only Meshy required for 3D |
 | **Unity happy path** | UPM `com.assetassembly.import`; `import_request.json` → C# `AaaImportRunner` → `unity_import_result.json` |
 | **Unity repair** | Agent CLI (Cursor/Claude) + `unity_import_repair.md` **only on validation failure** |
@@ -73,7 +73,7 @@ Durable spec for the v0.2 enhancement track. See the implementation plan for ful
 | Unity repair | Default **AnkleBreaker** `unity` / user-unity; Coplay + Official fallbacks via Settings / config |
 | Unity version | **Unity 6** Editor required for `unity_import` |
 | Unity package | Injected to `Packages/com.assetassembly.import/` — not loose `Assets/` copies |
-| Magnific | Auto stage + Workflow Uprez button |
+| Magnific | Auto stage after approval (preview native concepts first) |
 | Parallel Unity | **Never** — `unity_imports: 1` wait-queue |
 
 ## Meshy API notes
@@ -108,7 +108,7 @@ Baseline bottlenecks addressed in this release:
 |------------|-----|
 | Remesh polls i2d when disabled | Immediate skip when `remesh_enabled=false` |
 | i2d fbx+glb | Default fbx-only for pipeline |
-| 2048px downscale after Magnific | Quality cap 4096px / 18MB |
+| 2048px downscale after Magnific | Quality cap 4096px / **20 MB hard cap** (default 18 MB) |
 | s11 always cursor-agent | C# watcher; agent only on fail |
 | max_concurrent_jobs unused | Provider semaphores wired |
 

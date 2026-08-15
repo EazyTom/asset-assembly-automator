@@ -3,6 +3,8 @@ from asset_assembly_automator.gui.widgets.pipeline_stepper import MeshyWorkflowS
 
 
 def test_meshy_workflow_stage_order_includes_unity_import():
+    assert MESHY_WORKFLOW_STAGE_ORDER[0] == StageId.MAGNIFIC_UPREZ
+    assert StageId.IMAGE_PREP in MESHY_WORKFLOW_STAGE_ORDER
     assert MESHY_WORKFLOW_STAGE_ORDER[-1] == StageId.UNITY_IMPORT
 
 
@@ -25,7 +27,8 @@ def test_stepper_unity_import_done(qtbot):
 def test_stepper_concept_image_label(qtbot):
     stepper = MeshyWorkflowStepper()
     qtbot.addWidget(stepper)
-    assert stepper.labels[0].toolTip() == "Concept Image"
+    assert stepper.labels[0].toolTip() == "Magnific Uprez"
+    assert stepper.labels[1].toolTip() == "Image Prep"
 
 
 def test_stepper_unity_import_failed(qtbot):

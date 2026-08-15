@@ -15,7 +15,7 @@ _STYLE_PENDING = f"color: {STATUS_COLORS['queued']}; font-size: 16px;"
 _STYLE_STALE = f"color: {STATUS_COLORS['failed']}; font-size: 16px; font-weight: bold;"
 
 STAGE_DISPLAY_LABELS: dict[str, str] = {
-    StageId.IMAGE_PREP.value: "Concept Image",
+    StageId.IMAGE_PREP.value: "Image Prep",
     StageId.MAGNIFIC_UPREZ.value: "Magnific Uprez",
 }
 

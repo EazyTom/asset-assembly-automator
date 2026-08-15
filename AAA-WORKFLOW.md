@@ -1,6 +1,6 @@
 # AAA Workflow — Concept Image → Meshy → FBX → Unity MCP
 
-A focused PyQt app for Character / Vehicle / Aircraft FBX pipelines: generate or drop an approved concept, optional Magnific uprez, run Meshy, export FBX + textures, then **deterministic Unity import** via the AAA UPM package (AnkleBreaker MCP agent **only on validation failure**).
+A focused PyQt app for Character / Vehicle / Aircraft FBX pipelines: generate or drop a concept, **preview native**, approve, Magnific uprez, run Meshy (auto-resize under 20 MB), export FBX + textures, then **deterministic Unity import** via the AAA UPM package (AnkleBreaker MCP agent **only on validation failure**).
 
 **In scope:** Approved concept via drag-drop, Midjourney, optional Magnific/Higgsfield generate, Magnific Uprez, Meshy chain, Unity import.
 
@@ -39,14 +39,15 @@ Entry point: `aaa-workflow` (after `pip install -e ".[dev]"`).
 ```mermaid
 flowchart LR
     subgraph pyqt [AAA Workflow PyQt]
-        CI[Concept Image Higgs/Magnific/Uprez]
-        DZ[Drop zone T-pose PNG]
-        BS[bootstrap pipeline Save]
+        CI[Concept prompt / drop]
+        PV[Preview native image]
+        SV[Save approve]
+        UP[Magnific uprez after approval]
         MR[Run Meshy chain]
         UI[Import to Unity button]
     end
     subgraph meshy [Meshy stages s04-s10]
-        IP[Concept Image image_prep]
+        IP[image_prep resize under 20MB]
         I2D[i2d]
         RM[remesh]
         RG[rig]
@@ -63,9 +64,7 @@ flowchart LR
         MCP[AnkleBreaker unity]
         ED[Unity Editor]
     end
-    CI --> BS
-    DZ --> BS
-    BS --> MR
+    CI --> PV --> SV --> UP --> MR
     MR --> IP --> I2D --> RM --> RG --> AN --> DL --> QC --> ZIP
     ZIP --> ST --> PKG --> CS --> ED
     CS -->|fail| AG --> MCP --> CS
@@ -90,7 +89,7 @@ flowchart LR
 | `gui/workflow_main.py` | Workflow window — Concept Image UI + Meshy + Unity |
 | `gui/widgets/drop_zone.py` | Drag-and-drop T-pose entry |
 | `gui/widgets/character_preview_panel.py` | T-pose + mesh preview |
-| `gui/widgets/pipeline_stepper.py` | `MeshyWorkflowStepper` (Concept Image → Meshy → Unity) |
+| `gui/widgets/pipeline_stepper.py` | `MeshyWorkflowStepper` (Magnific Uprez → Image Prep → Meshy → Unity) |
 | `workflow/bootstrap.py` | Drop → pipeline + tpose seed |
 | `stages/s11_unity_import.py` | Stage files + Cursor CLI trigger |
 | `workflow/unity_mcp_workflow.py` | Compose import/cleanup prompts + run CLI |
@@ -104,13 +103,13 @@ flowchart LR
 
 1. **Project** — select existing project or use auto-created Default Project.
 2. **Character name** — slugged for output folders; **Save** commits concept or rename.
-3. **Concept Image** — edit prompt; optionally **Use Higgs** (Higgsfield MCP) or **Use Magnific**; or drag-drop / Midjourney import without either provider.
+3. **Concept Image** — edit prompt; optionally **Use Higgs** or **Use Magnific** to generate a native preview; or drag-drop / Midjourney import. Preview first — do not uprez yet.
 4. **Drop zone** — alternative: drag PNG/JPG/WEBP T-pose art directly.
-5. **Preview** — generated, uprezzed, or dropped image; click **Save** to write `TPose/CHR_{slug}_TPose_Approved_v01.png`.
+5. **Preview** — generated or dropped native image; click **Save** to approve (`TPose/CHR_{slug}_TPose_Approved_v01.png`).
 6. **Unity project** — path to Unity project root (saved on `projects.unity_project_path`).
 7. **Poly budget** — hero / npc / crowd (Meshy API max 300k tris, 4K HD textures).
 8. **Texture prompt** — optional Meshy texture prompt (used when `use_hires_texture_image` is false).
-9. **Run Meshy** — cost confirmation, then Concept Image prep (auto-downscale if >2048px / 18MB) and full Meshy chain.
+9. **Run Meshy** — cost confirmation, then **Magnific uprez** (if enabled), then image prep (Python resize if over **20 MB** / configured px cap) and the Meshy chain.
 10. **Unity import prompt** — editable multiline text preloaded from `unity_import.md`.
 11. **Import to Unity (Cursor MCP)** — runs `s11_unity_import`.
 12. **Remove from Unity (Cursor MCP)** — cleanup prompt for re-test.

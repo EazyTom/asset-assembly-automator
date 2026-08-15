@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from asset_assembly_automator.clients.image_prep import select_tpose_source
 from asset_assembly_automator.core.config import get_settings
 from asset_assembly_automator.core.db.models import StageResult
 from asset_assembly_automator.core.output_paths import approved_concept_path, pipeline_output_slug
@@ -16,7 +17,9 @@ async def _run(ctx, db, dirs, writer):
             success=False, stage=StageId.MAGNIFIC_UPREZ.value, error="Pipeline not found"
         )
 
-    if not pipe.metadata.get("magnific_enabled", get_settings().magnific.default_enabled):
+    settings = get_settings()
+    meta = pipe.metadata or {}
+    if not meta.get("magnific_enabled", settings.magnific.default_enabled):
         writer.log(
             "info",
             "Magnific uprez skipped",
@@ -31,22 +34,35 @@ async def _run(ctx, db, dirs, writer):
             data={"skipped": True, "reason": "magnific_disabled"},
         )
 
+    if meta.get("magnific_already_applied"):
+        writer.log(
+            "info",
+            "Magnific uprez skipped — already applied before approval",
+            skipped=True,
+            reason="already_applied",
+        )
+        return StageResult(
+            success=True,
+            stage=StageId.MAGNIFIC_UPREZ.value,
+            message="Magnific uprez skipped (already applied)",
+            next_stage=StageId.IMAGE_PREP.value,
+            data={"skipped": True, "reason": "already_applied"},
+        )
+
     assets = db.get_assets(ctx.pipeline_id, "tpose")
     if not assets:
         assets = db.get_assets(ctx.pipeline_id, "concept")
-    if not assets:
+    source_path = select_tpose_source(assets)
+    if not source_path:
         return StageResult(
             success=False,
             stage=StageId.MAGNIFIC_UPREZ.value,
             error="No approved concept image for Magnific uprez",
         )
-
-    source_path = assets[0]["file_path"]
     output_slug = pipeline_output_slug(pipe)
     approved_path = approved_concept_path(dirs, output_slug, pipe.asset_kind)
     approved_path.parent.mkdir(parents=True, exist_ok=True)
 
-    meta = pipe.metadata or {}
     if meta.get("magnific_output_path") == str(approved_path) and approved_path.is_file():
         writer.log(
             "info",
@@ -63,20 +79,23 @@ async def _run(ctx, db, dirs, writer):
             data={"skipped": True, "path": str(approved_path)},
         )
 
-    settings = get_settings()
+    mode = str(meta.get("magnific_upscale_mode") or settings.magnific.upscale_mode)
+    scale = str(meta.get("magnific_upscale_scale_factor") or settings.magnific.upscale_scale_factor)
+    flavor = str(meta.get("magnific_upscale_flavor") or settings.magnific.upscale_flavor)
     client = get_magnific_client(ctx.dry_run, dirs["concept"])
     try:
         writer.log(
             "info",
             "Starting Magnific upscale",
             provider="magnific",
-            mode=settings.magnific.upscale_mode,
+            mode=mode,
+            scale_factor=scale,
         )
         result = await client.upscale_image(
             source_path,
-            scale_factor=settings.magnific.upscale_scale_factor,
-            mode=settings.magnific.upscale_mode,  # type: ignore[arg-type]
-            flavor=settings.magnific.upscale_flavor,
+            scale_factor=scale,
+            mode=mode,  # type: ignore[arg-type]
+            flavor=flavor,
         )
         local_path = result.get("local_path")
         if not local_path:

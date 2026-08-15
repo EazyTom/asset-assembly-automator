@@ -71,6 +71,7 @@ class WorkflowWindow(QMainWindow):
         self._selected_project_id: int | None = None
         self._last_drop_path: str | None = None
         self._pending_drop_path: str | None = None
+        self._pending_already_uprezzed = False
         self._saved_character_name: str | None = None
         self._saved_unity_prompt: str | None = None
         self._last_log_id = 0
@@ -196,6 +197,12 @@ class WorkflowWindow(QMainWindow):
         gen_btn_row.addWidget(self.use_higgs_btn)
         gen_btn_row.addWidget(self.use_magnific_btn)
         concept_layout.addLayout(gen_btn_row)
+        preview_hint = QLabel(
+            "Preview native concepts first (drop / Higgs / Magnific generate). "
+            "Magnific uprez runs automatically after Save, before Meshy."
+        )
+        preview_hint.setWordWrap(True)
+        concept_layout.addWidget(preview_hint)
 
         uprez_row = QHBoxLayout()
         self.uprez_mode = QComboBox()
@@ -208,7 +215,11 @@ class WorkflowWindow(QMainWindow):
         self.uprez_flavor.addItem("sublime", "sublime")
         self.uprez_flavor.addItem("photo", "photo")
         self.uprez_flavor.addItem("photo_denoiser", "photo_denoiser")
-        self.uprez_btn = QPushButton("Uprez")
+        self.uprez_btn = QPushButton("Preview uprez")
+        self.uprez_btn.setToolTip(
+            "Optional: preview Magnific upscale before Save. "
+            "Uprez still runs automatically after approval unless you already previewed it."
+        )
         self.uprez_btn.clicked.connect(self._on_uprez)
         self.uprez_mode.currentIndexChanged.connect(self._on_uprez_mode_changed)
         uprez_row.addWidget(self.uprez_mode)
@@ -654,10 +665,7 @@ class WorkflowWindow(QMainWindow):
     @staticmethod
     def _friendly_stage_label(pipe) -> str:
         stage_raw = str(pipe.current_stage)
-        if stage_raw == StageId.IMAGE_PREP.value:
-            stage = stage_display_label(StageId.IMAGE_PREP)
-        else:
-            stage = stage_raw.replace("_", " ").strip().capitalize()
+        stage = stage_display_label(stage_raw)
         status = (getattr(pipe, "status", "") or "").lower()
         unity_done, unity_failed = WorkflowWindow._unity_import_state(pipe)
         if unity_done:
@@ -996,12 +1004,14 @@ class WorkflowWindow(QMainWindow):
                         self._selected_pipeline
                         or find_workflow_pipeline(self.db, self._selected_project_id, asset_name)
                     ),
+                    **self._magnific_save_kwargs(),
                 )
             except OSError as exc:
                 QMessageBox.warning(self, "Save character", f"Could not save dropped image: {exc}")
                 return
 
             self._pending_drop_path = None
+            self._pending_already_uprezzed = False
             self._last_drop_path = None
             pipe = self.db.get_pipeline(pipeline_id)
             if pipe:
@@ -1012,7 +1022,10 @@ class WorkflowWindow(QMainWindow):
             self._update_save_character_state()
             self._refresh_pipeline_list(select_pipeline_id=pipeline_id)
             self._update_output_folder_display()
-            self.status_label.setText(f"Saved character “{asset_name}”")
+            self.status_label.setText(
+                f"Saved character “{asset_name}” — preview approved. "
+                "Run Meshy to Magnific-uprez (if enabled), then image-to-3D."
+            )
             return
 
         if not self._selected_pipeline:
@@ -1049,6 +1062,18 @@ class WorkflowWindow(QMainWindow):
         self._refresh_pipeline_list(select_pipeline_id=self._selected_pipeline)
         self._update_output_folder_display()
         self.status_label.setText(f"Renamed character to “{asset_name}”")
+
+    def _magnific_save_kwargs(self) -> dict:
+        from asset_assembly_automator.core.config import get_settings
+
+        settings = get_settings()
+        return {
+            "magnific_enabled": settings.magnific.default_enabled,
+            "magnific_upscale_mode": str(self.uprez_mode.currentData()),
+            "magnific_upscale_scale_factor": str(self.uprez_scale.currentData()),
+            "magnific_upscale_flavor": str(self.uprez_flavor.currentData()),
+            "magnific_already_applied": self._pending_already_uprezzed,
+        }
 
     def _apply_magnific_ui_defaults(self) -> None:
         from asset_assembly_automator.core.config import get_settings
@@ -1108,6 +1133,7 @@ class WorkflowWindow(QMainWindow):
 
     def _apply_concept_result(self, path: str, *, status: str) -> None:
         self._pending_drop_path = str(Path(path).resolve())
+        self._pending_already_uprezzed = False
         self.preview_panel.show_tpose_preview(self._pending_drop_path)
         self._update_save_character_state()
         self._update_output_folder_display()
@@ -1221,7 +1247,7 @@ class WorkflowWindow(QMainWindow):
                 raise RuntimeError("Higgsfield result missing local_path")
             self._apply_concept_result(
                 path,
-                status="Higgsfield concept ready — click Save to approve, then Run Meshy",
+                status="Higgsfield concept ready — preview, then Save to approve. Magnific uprez runs after approval.",
             )
         except Exception as exc:
             self.status_label.setText(f"Higgsfield failed: {exc}")
@@ -1245,7 +1271,7 @@ class WorkflowWindow(QMainWindow):
                 raise RuntimeError("Magnific result missing local_path")
             self._apply_concept_result(
                 path,
-                status="Magnific concept ready — click Save to approve, then Run Meshy",
+                status="Magnific concept ready — preview, then Save to approve. Magnific uprez runs after approval.",
             )
         except Exception as exc:
             self.status_label.setText(f"Magnific failed: {exc}")
@@ -1276,8 +1302,9 @@ class WorkflowWindow(QMainWindow):
                 raise RuntimeError("Magnific upscale missing local_path")
             self._apply_concept_result(
                 path,
-                status=f"Uprezzed ({scale}, {mode}) — click Save to approve, then Run Meshy",
+                status=f"Uprez preview ({scale}, {mode}) — Save to approve. Auto-uprez will skip if you keep this image.",
             )
+            self._pending_already_uprezzed = True
         except Exception as exc:
             self.status_label.setText(f"Uprez failed: {exc}")
             QMessageBox.warning(self, "Uprez", str(exc))
@@ -1294,6 +1321,7 @@ class WorkflowWindow(QMainWindow):
             return
         path = Path(paths[0])
         self._pending_drop_path = str(path.resolve())
+        self._pending_already_uprezzed = False
 
         existing_name = self.character_name.text().strip()
         if existing_name:
@@ -1339,16 +1367,24 @@ class WorkflowWindow(QMainWindow):
         if self._selected_pipeline:
             pipe = self.controller.get_pipeline(self._selected_pipeline)
             if pipe:
+                from asset_assembly_automator.workflow.bootstrap import meshy_workflow_start_stage
+
+                mag = self._magnific_save_kwargs()
                 meta = {
                     **pipe.metadata,
                     "meshy_texture_prompt": self.texture_prompt.toPlainText().strip(),
+                    "magnific_enabled": mag["magnific_enabled"],
+                    "magnific_upscale_mode": mag["magnific_upscale_mode"],
+                    "magnific_upscale_scale_factor": mag["magnific_upscale_scale_factor"],
+                    "magnific_upscale_flavor": mag["magnific_upscale_flavor"],
                 }
+                current = StageId(pipe.current_stage)
+                if current in (StageId.DRAFT, StageId.IMAGE_PREP, StageId.MAGNIFIC_UPREZ):
+                    current = meshy_workflow_start_stage(meta)
                 self.db.update_pipeline_poly_budget(
                     self._selected_pipeline, self.poly_budget.currentText()
                 )
-                self.db.update_pipeline_stage(
-                    self._selected_pipeline, pipe.current_stage, metadata=meta
-                )
+                self.db.update_pipeline_stage(self._selected_pipeline, current.value, metadata=meta)
                 return self._selected_pipeline
 
         QMessageBox.warning(

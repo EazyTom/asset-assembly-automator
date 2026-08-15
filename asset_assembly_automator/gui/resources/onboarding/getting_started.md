@@ -35,9 +35,9 @@ Copy `mcp.json.example` → `.mcp.json` at repo root (gitignored). Enable **one*
 
 You need an approved reference image before Meshy, but **not** Higgsfield specifically:
 
-- **Midjourney** — manual generate + watch-folder import or drag-drop (no API)
-- **Magnific** — REST upscaler / Mystic generate (Workflow **Use Magnific** / **Uprez**; auto stage in Command Center)
-- **Higgsfield** — optional MCP/REST concept generate (Workflow **Use Higgs**; Command Center `concept_generate`)
+- **Midjourney** — manual generate + watch-folder import or drag-drop (no API). Preview native images first.
+- **Magnific** — REST upscaler **after you approve** a concept (Workflow auto stage / Command Center `magnific_uprez`). Optional Mystic generate for a native preview (**Use Magnific**).
+- **Higgsfield** — optional MCP/REST concept generate (Workflow **Use Higgs**; Command Center **Refine**)
 
 ## Optional — Phase 2
 

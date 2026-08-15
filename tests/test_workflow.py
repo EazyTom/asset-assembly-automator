@@ -13,7 +13,10 @@ from asset_assembly_automator.core.db.models import Database
 from asset_assembly_automator.core.state_machine import StageId
 from asset_assembly_automator.stages import s11_unity_import
 from asset_assembly_automator.stages._base import bind_db, load_unity_import_template, unbind_db
-from asset_assembly_automator.workflow.bootstrap import bootstrap_meshy_pipeline
+from asset_assembly_automator.workflow.bootstrap import (
+    bootstrap_meshy_pipeline,
+    meshy_workflow_start_stage,
+)
 from PIL import Image
 
 
@@ -180,7 +183,7 @@ def test_bootstrap_meshy_pipeline(workflow_db, tmp_path):
     )
     pipe = database.get_pipeline(pipeline_id)
     assert pipe is not None
-    assert pipe.current_stage == StageId.IMAGE_PREP.value
+    assert pipe.current_stage == StageId.MAGNIFIC_UPREZ.value
     assert pipe.metadata.get("workflow") == "meshy_drop"
     assert pipe.metadata.get("character_slug") == "testhero"
     assert pipe.metadata.get("folder_slug") == "workflowproject-testhero"
@@ -191,6 +194,32 @@ def test_bootstrap_meshy_pipeline(workflow_db, tmp_path):
     assert Path(assets[0]["file_path"]).exists()
     concepts = database.get_assets(pipeline_id, "concept")
     assert len(concepts) == 1
+
+
+def test_meshy_workflow_start_stage():
+    assert meshy_workflow_start_stage({"magnific_enabled": True}) == StageId.MAGNIFIC_UPREZ
+    assert meshy_workflow_start_stage({"magnific_enabled": False}) == StageId.IMAGE_PREP
+    assert (
+        meshy_workflow_start_stage({"magnific_enabled": True, "magnific_already_applied": True})
+        == StageId.IMAGE_PREP
+    )
+
+
+def test_bootstrap_skips_uprez_when_disabled(workflow_db, tmp_path):
+    database, project_id, _, _ = workflow_db
+    image = tmp_path / "hero.png"
+    _write_png(image)
+    pipeline_id = bootstrap_meshy_pipeline(
+        database,
+        project_id,
+        "NoUprezHero",
+        image,
+        magnific_enabled=False,
+    )
+    pipe = database.get_pipeline(pipeline_id)
+    assert pipe is not None
+    assert pipe.current_stage == StageId.IMAGE_PREP.value
+    assert pipe.metadata.get("magnific_enabled") is False
 
 
 def test_bootstrap_reuses_pipeline_and_updates_image(workflow_db, tmp_path):

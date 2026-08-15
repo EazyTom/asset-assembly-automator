@@ -30,7 +30,7 @@ class ConceptCompareView(QWidget):
         super().__init__(parent)
         self._assets: list[dict] = []
         root = QVBoxLayout(self)
-        root.addWidget(QLabel("Concept candidates (Higgsfield vs Midjourney)"))
+        root.addWidget(QLabel("Concept candidates — preview native images, then approve"))
 
         split = QSplitter(Qt.Orientation.Horizontal)
         self.list = QListWidget()
@@ -58,8 +58,9 @@ class ConceptCompareView(QWidget):
         root.addWidget(self.approve_btn)
         root.addWidget(self.refine_btn)
         self.hint = QLabel(
-            "Concept previews load automatically. Scroll the mouse wheel to zoom toward the cursor. "
-            "Click and drag to pan. Approve the best T-pose candidate to continue."
+            "Preview native concept images first (Midjourney import, drop, or optional Higgs/Magnific generate). "
+            "Scroll the mouse wheel to zoom toward the cursor. Click and drag to pan. "
+            "Approve the best T-pose — Magnific uprez then Meshy run automatically after approval."
         )
         self.hint.setWordWrap(True)
         root.addWidget(self.hint)
@@ -92,7 +93,9 @@ class ConceptCompareView(QWidget):
     def _show_preview(self, asset: dict | None) -> None:
         if not asset:
             self.preview_label.setText(
-                "No concept images yet.\nBuild and save prompts, then Run Next."
+                "No concept images yet.\n"
+                "Import or drop a PNG, or click Refine to generate with Higgsfield.\n"
+                "Preview here first — Magnific uprez runs after you approve."
             )
             self.preview_label.set_source_pixmap(None)
             self.preview_meta.setText("")

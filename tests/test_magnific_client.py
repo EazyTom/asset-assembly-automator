@@ -65,8 +65,37 @@ def test_downscale_to_budget_resizes_large_image(tmp_path: Path):
     assert meta["downscaled"] is True
     assert meta["final_width"] <= 2048
     assert meta["final_height"] <= 3072
-    assert dest.stat().st_size <= 18 * 1024 * 1024
+    assert Path(meta["path"]).stat().st_size <= 18 * 1024 * 1024
+
+
+def test_downscale_to_budget_respects_byte_limit(tmp_path: Path):
+    import os
+
+    from asset_assembly_automator.clients.image_prep import MESHY_I2D_HARD_LIMIT_BYTES
+    from PIL import Image
+
+    src = tmp_path / "noise.png"
+    w, h = 1200, 1200
+    Image.frombytes("RGB", (w, h), os.urandom(w * h * 3)).save(src, format="PNG")
+    dest = tmp_path / "capped.png"
+    meta = downscale_to_budget(str(src), str(dest), max_px=8192, max_bytes=250_000)
+    assert Path(meta["path"]).stat().st_size <= 250_000
+    assert meta["final_bytes"] <= 250_000
+    assert meta["final_bytes"] <= MESHY_I2D_HARD_LIMIT_BYTES
+
+
+def test_select_tpose_source_prefers_native_then_prepped():
+    from asset_assembly_automator.clients.image_prep import select_tpose_source
+
+    assets = [
+        {"file_path": r"C:\out\hero_prepped.png"},
+        {"file_path": r"C:\out\hero_cropped.png"},
+        {"file_path": r"C:\out\hero_approved.png"},
+    ]
+    assert select_tpose_source(assets) == r"C:\out\hero_approved.png"
+    assert select_tpose_source(assets, prefer_prepped=True) == r"C:\out\hero_prepped.png"
 
 
 def test_stage_display_label_concept_image():
-    assert stage_display_label(StageId.IMAGE_PREP) == "Concept Image"
+    assert stage_display_label(StageId.IMAGE_PREP) == "Image Prep"
+    assert stage_display_label(StageId.MAGNIFIC_UPREZ) == "Magnific Uprez"

@@ -7,6 +7,7 @@ from asset_assembly_automator.core.state_machine import (
     StageId,
     next_stage,
     runnable_stage,
+    stage_order_for_kind,
     stage_progress,
 )
 from asset_assembly_automator.orchestrator.resume import find_resumable_pipelines, should_regenerate
@@ -22,9 +23,12 @@ def db(tmp_path):
 
 
 def test_state_machine_next_stage():
-    assert next_stage(StageId.PROMPT_BUILD) == StageId.CONCEPT_GENERATE
+    assert next_stage(StageId.PROMPT_BUILD) == StageId.CONCEPT_REVIEW
+    assert next_stage(StageId.CONCEPT_REVIEW) == StageId.MAGNIFIC_UPREZ
+    assert next_stage(StageId.MAGNIFIC_UPREZ) == StageId.IMAGE_PREP
     assert next_stage(StageId.IMAGE_PREP, multi_view=False) == StageId.MESHY_I2D
     assert next_stage(StageId.IMAGE_PREP, multi_view=True) == StageId.TURNAROUND
+    assert StageId.CONCEPT_GENERATE not in stage_order_for_kind("character")
 
 
 def test_stage_progress():

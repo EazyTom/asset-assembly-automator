@@ -59,9 +59,10 @@ See [`mcp.json.example`](mcp.json.example) and **Settings → Unity MCP bridge**
 flowchart TD
     subgraph concept [Concept]
         PB[prompt_build]
-        CG[concept_generate]
-        CR[concept_review]
-        IP[image_prep]
+        CG[concept_generate optional]
+        CR[concept_review preview]
+        UP[magnific_uprez after approval]
+        IP[image_prep under 20MB]
         TA[turnaround optional]
     end
     subgraph meshy [Meshy]
@@ -78,7 +79,9 @@ flowchart TD
         CUR[Cursor CLI agent]
         MCP[user-unity]
     end
-    PB --> CG --> CR --> IP
+    PB --> CR
+    CG -.-> CR
+    CR --> UP --> IP
     IP --> TA --> I2D
     IP --> I2D
     I2D --> RM --> RG --> AN --> DL --> QC --> ZIP
@@ -110,10 +113,11 @@ flowchart TD
 
 | Stage | CLI module | Manual gate? | Notes |
 |-------|------------|--------------|-------|
-| `prompt_build` | `s01_prompt_build` | No | Renders MJ/HF/Meshy prompts from YAML templates |
-| `concept_generate` | `s02_concept_generate` | No | **Optional** Higgsfield MCP/REST (fake in dry-run). Skip when using Midjourney import or manual PNG at review |
-| `concept_review` | `s03_concept_review` | **Yes** | Approve concept PNG (any provider) → approved image for prep/Magnific |
-| `image_prep` | `s04_image_prep` | No | T-pose checklist, optional crop |
+| `prompt_build` | `s01_prompt_build` | No | Renders MJ/HF/Meshy prompts from YAML templates. Next stop is **preview** (`concept_review`), not Higgs/Magnific. |
+| `concept_generate` | `s02_concept_generate` | No | **Optional** Higgsfield MCP/REST (Refine / Use Higgs). Skip when using Midjourney import or manual PNG at review |
+| `concept_review` | `s03_concept_review` | **Yes** | Preview native concepts, then approve → Magnific uprez |
+| `magnific_uprez` | `s04c_magnific_uprez` | No | Auto Magnific upscale **after** concept approval (skippable) |
+| `image_prep` | `s04_image_prep` | No | T-pose checklist, crop, Python resize to Meshy **20 MB** / px cap |
 | `turnaround` | `s04b_turnaround` | No | Opt-in multi-view for `multi-image-to-3d` |
 | `meshy_i2d` | `s05_meshy_image_to_3d` | No | t-pose, quad, PBR, FBX+GLB |
 | `meshy_remesh` | `s06_meshy_remesh` | No | Remesh to budget (default max 300k tris; skipped if i2d already within target) |
@@ -123,7 +127,6 @@ flowchart TD
 | `meshy_qc` | `s09b_qc_validate` | No | Polycount / file presence gate |
 | `package_export` | `s10_package_export` | No | FBX.zip + `pipeline_manifest.json` |
 | `unity_import` | `s11_unity_import` | No | UPM package + C# watcher; agent repair on validation failure only |
-| `magnific_uprez` | `s04c_magnific_uprez` | No | Auto Magnific upscale after concept approval (skippable) |
 
 Run a single stage:
 

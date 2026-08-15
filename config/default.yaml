@@ -47,7 +47,8 @@ meshy:
     - idle12
   multi_view: false
   max_concurrent_jobs: 2
-  # Cap image-to-3D upload size (Meshy UI ~20MB; API 100MB). Base64 inflates payload ~37%.
+  # Cap image-to-3D upload size. Meshy Workspace UI is 20 MB (hard-capped in
+  # image_prep); API allows 100 MB. Default 18 MB leaves headroom. Base64 inflates ~37%.
   i2d_max_image_px: 4096
   i2d_max_image_mb: 18
   use_hires_texture_image: false

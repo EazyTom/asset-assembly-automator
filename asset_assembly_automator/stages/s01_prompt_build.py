@@ -77,7 +77,7 @@ async def _run(ctx, db, dirs, writer):
         success=True,
         stage=StageId.PROMPT_BUILD.value,
         message="Prompts built",
-        next_stage=StageId.CONCEPT_GENERATE.value,
+        next_stage=StageId.CONCEPT_REVIEW.value,
         data=meta,
     )
 

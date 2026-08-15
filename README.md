@@ -69,24 +69,26 @@ The workflow app supports **in-app concept generation** before Meshy, in additio
 
 1. Select or create a **project** and **character name**.
 2. Edit the **Concept Image** prompt (prefilled T-pose character-sheet template).
-3. **Optional:** click **Use Higgs** or **Use Magnific** to generate in-app (cost confirmation; skipped in dry-run). Or drag-drop / import a PNG from Midjourney — no Higgsfield needed.
-4. Optionally click **Uprez** with Magnific (Mode: Precision V2 / Creative; Scale: 2x–16x; Flavor for Precision).
-5. Preview the result → **Save** (writes `TPose/CHR_{slug}_TPose_Approved_v01.png`) → **Run Meshy**.
+3. **Optional:** click **Use Higgs** or **Use Magnific** to generate a native preview (cost confirmation; skipped in dry-run). Or drag-drop / import a PNG from Midjourney — no Higgsfield needed.
+4. **Preview** the native result. Magnific uprez does **not** run yet (optional **Preview uprez** only if you want a sneak peek).
+5. **Save** (writes `TPose/CHR_{slug}_TPose_Approved_v01.png`) → **Run Meshy** (Magnific uprez after approval, then image prep ≤20 MB, then Meshy).
 
 ```mermaid
 flowchart LR
-    prompt[Concept prompt] --> gen{Generate}
+    prompt[Concept prompt] --> gen{Generate or drop}
     gen -->|Use Higgs| hf[Higgsfield]
     gen -->|Use Magnific| mag[Magnific Mystic]
-    hf --> prev[Preview]
+    gen -->|Drag-drop PNG| drop[Native file]
+    hf --> prev[Preview native]
     mag --> prev
-    drop[Drag-drop PNG] --> prev
-    prev -->|Uprez| up[Magnific upscaler] --> prev
-    prev -->|Save| boot[bootstrap_meshy_pipeline]
-    boot -->|Run Meshy| meshy[image_prep -> meshy_i2d ...]
+    drop --> prev
+    prev -->|Save approve| appr[Approved T-pose]
+    appr --> up[Magnific uprez]
+    up --> prep[image_prep resize under 20MB]
+    prep --> meshy[meshy_i2d ...]
 ```
 
-The first pipeline step displays **Concept Image** (DB stage id remains `image_prep`).
+The Meshy stepper starts at **Magnific Uprez** (skipped when disabled), then **Image Prep** (DB stage `image_prep`).
 
 **Dry-run:** `.\.venv\Scripts\python.exe -m asset_assembly_automator.gui.workflow_main --dry-run` uses fake clients — no API credits.
 
@@ -113,7 +115,7 @@ flowchart TB
     end
     subgraph stages [Stage modules s01-s11]
         S1[prompt / concept]
-        S2[Concept Image image_prep]
+        S2[image_prep under 20MB]
         S3[meshy chain]
         S4[unity import s11]
     end
@@ -159,9 +161,10 @@ flowchart TB
 flowchart TD
     subgraph concept [Concept phase]
         PB[prompt_build s01]
-        CG[concept_generate s02]
-        CR[concept_review s03 MANUAL GATE]
-        IP[Concept Image image_prep s04]
+        CG[concept_generate s02 optional]
+        CR[concept_review s03 MANUAL GATE preview]
+        UP[magnific_uprez s04c after approval]
+        IP[image_prep s04 resize under 20MB]
         TA[turnaround s04b optional]
     end
     subgraph meshy [Meshy phase]
@@ -176,8 +179,9 @@ flowchart TD
     subgraph phase2 [Phase 2 optional]
         UI[unity_import s11]
     end
-    PB --> CG --> CR
-    CR --> IP
+    PB --> CR
+    CG -.-> CR
+    CR --> UP --> IP
     IP --> TA
     IP --> I2D
     TA --> I2D
@@ -186,9 +190,9 @@ flowchart TD
     ZIP -.-> UI
 ```
 
-**Manual gate (Command Center):** `concept_review` stops auto-run until the user approves a concept image in the GUI.
+**Manual gate (Command Center):** `concept_review` stops auto-run so you can **preview native** Midjourney / drop / optional Higgs or Magnific generate images. Approve, then Magnific uprez runs, then Meshy.
 
-**Meshy Workflow app** can start at **Concept Image** (`image_prep`) after Save, or from `draft` with generate/drop → Save. Runs through `unity_import` when configured.
+**Meshy Workflow app** previews first, **Save** approves, then **Run Meshy** starts at `magnific_uprez` (if enabled) → `image_prep` → `meshy_i2d` … → `unity_import`.
 
 ---
 
@@ -208,9 +212,9 @@ flowchart LR
         P2[Phase2StubView]
     end
     subgraph workflow [Workflow gui/workflow_main.py]
-        CI[Concept Image prompt + Higgs/Magnific/Uprez]
+        CI[Concept prompt + optional Higgs/Magnific generate]
         DZ[DropZone]
-        CPP[CharacterPreviewPanel]
+        CPP[CharacterPreviewPanel preview first]
         MWS[MeshyWorkflowStepper]
         CFG[Project / Unity settings]
         UIP[Unity import prompt editor]
@@ -248,26 +252,27 @@ flowchart LR
 
 | Widget / section | Purpose |
 |------------------|---------|
-| **Concept Image** | Prompt textarea + **Use Higgs** / **Use Magnific** / **Uprez** (Mode, Scale, Flavor dropdowns) |
+| **Concept Image** | Prompt textarea + **Use Higgs** / **Use Magnific** generate (preview native). Uprez settings apply **after Save**. Optional **Preview uprez**. |
 | `DropZone` | Drag T-pose PNG/JPG/WEBP (alternative to generation) |
 | `CharacterPreviewPanel` | T-pose preview + post-i2d mesh preview |
-| `MeshyWorkflowStepper` | Concept Image → Meshy stages → Unity import |
+| `MeshyWorkflowStepper` | Magnific Uprez → Image Prep → Meshy stages → Unity import |
 | Unity prompt editor | Editable `unity_import.md` override per pipeline |
-| `ProviderCostConfirmDialog` | Credit/cost estimate before Higgs/Magnific/Uprez |
+| `ProviderCostConfirmDialog` | Credit/cost estimate before Higgs/Magnific generate or uprez |
 
 Async model: **qasync** bridges Qt events and `asyncio`; concept generation uses `loop.create_task()`; Meshy runs via `PipelineController.schedule_meshy_workflow()`.
 
 ---
 
-## Meshy image size limits (Concept Image → i2d)
+## Meshy image size limits (after Magnific → i2d)
 
-Large 4K concept PNGs can exceed Meshy's practical upload limits (~20 MB in Workspace UI; API allows up to 100 MB). The client also base64-encodes images (~37% size inflation).
+Large Magnific uprez PNGs can exceed Meshy's practical upload limits (**20 MB** in Workspace UI; API allows up to 100 MB). The client also base64-encodes images (~37% size inflation).
 
-Stage `image_prep` (Concept Image) automatically:
+Stage `image_prep` (and a safety check in `meshy_i2d`) automatically:
 
 1. Crops with padding (`crop_with_padding`)
-2. Downscales when needed (`downscale_to_budget`) to configured limits (default **2048 px** long side, **18 MB** file size)
-3. Stores hi-res cropped source in `metadata.hires_texture_path` when downscaled
+2. Downscales with Python/`Pillow` (`downscale_to_budget`) to configured limits (default **4096 px** long side, **18 MB** file size) and **never exceeds the 20 MB UI hard cap**
+3. Falls back to JPEG if a PNG still will not fit
+4. Stores hi-res cropped source in `metadata.hires_texture_path` when downscaled
 
 Optional: set `meshy.use_hires_texture_image: true` in user config to pass the hi-res image as Meshy `texture_image_url` (mutually exclusive with `texture_prompt`).
 
@@ -416,7 +421,7 @@ flowchart LR
 
 | Section | Notable keys |
 |---------|----------------|
-| **meshy** | Poly budgets (300k default), HD textures, `i2d_max_image_px` (2048), `i2d_max_image_mb` (18), `use_hires_texture_image` (false) |
+| **meshy** | Poly budgets (300k default), HD textures, `i2d_max_image_px` (4096), `i2d_max_image_mb` (18, hard-capped at 20), `use_hires_texture_image` (false) |
 | **magnific** | `mystic_model` (super_real), `resolution` (2k), `aspect_ratio` (portrait_2_3), upscale mode/scale/flavor |
 | **higgsfield** | `provider` (mcp), `default_image_model` (soul_2), aspect ratio 2:3 |
 | **cursor_cli** | `command`, `timeout_seconds`, optional `model` |

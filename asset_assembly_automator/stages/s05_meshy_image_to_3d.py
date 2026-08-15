@@ -3,6 +3,11 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from asset_assembly_automator.clients.image_prep import (
+    ensure_i2d_upload_image,
+    select_tpose_source,
+)
+from asset_assembly_automator.core.config import get_settings
 from asset_assembly_automator.core.db.models import StageResult
 from asset_assembly_automator.core.mesh_preview import cache_mesh_preview_from_i2d
 from asset_assembly_automator.core.output_paths import pipeline_character_slug, preview_glb_path
@@ -108,11 +113,22 @@ async def _run(ctx, db, dirs, writer):
                 )
 
         tpose = db.get_assets(ctx.pipeline_id, "tpose")
-        if not tpose:
+        image_path = select_tpose_source(tpose, prefer_prepped=True)
+        if not image_path:
             return StageResult(
                 success=False, stage=StageId.MESHY_I2D.value, error="No T-pose asset"
             )
-        image_path = tpose[0]["file_path"]
+        settings = get_settings()
+        cap_dest = dirs["tpose"] / f"{Path(image_path).stem}_i2dcap.png"
+        cap_meta = ensure_i2d_upload_image(
+            image_path,
+            str(cap_dest),
+            max_px=settings.meshy.i2d_max_image_px,
+            max_mb=settings.meshy.i2d_max_image_mb,
+        )
+        if cap_meta.get("downscaled"):
+            writer.log("info", "Resized image for Meshy 20MB i2d limit", **cap_meta)
+            image_path = str(cap_meta["path"])
         meshy_prompt = pipe.metadata.get("meshy_texture_prompt", "")
         multi_paths = pipe.metadata.get("turnaround_paths")
 

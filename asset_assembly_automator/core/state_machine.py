@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 class StageId(StrEnum):
     DRAFT = "draft"
     PROMPT_BUILD = "prompt_build"
+    # Optional: Refine / Use Higgs. Not on the auto path — preview native concepts first.
     CONCEPT_GENERATE = "concept_generate"
     CONCEPT_REVIEW = "concept_review"
     MAGNIFIC_UPREZ = "magnific_uprez"
@@ -34,7 +35,6 @@ class StageId(StrEnum):
 CHARACTER_STAGE_ORDER: list[StageId] = [
     StageId.DRAFT,
     StageId.PROMPT_BUILD,
-    StageId.CONCEPT_GENERATE,
     StageId.CONCEPT_REVIEW,
     StageId.MAGNIFIC_UPREZ,
     StageId.IMAGE_PREP,
@@ -52,7 +52,6 @@ CHARACTER_STAGE_ORDER: list[StageId] = [
 VEHICLE_STAGE_ORDER: list[StageId] = [
     StageId.DRAFT,
     StageId.PROMPT_BUILD,
-    StageId.CONCEPT_GENERATE,
     StageId.CONCEPT_REVIEW,
     StageId.MAGNIFIC_UPREZ,
     StageId.IMAGE_PREP,
@@ -67,7 +66,6 @@ VEHICLE_STAGE_ORDER: list[StageId] = [
 AIRCRAFT_STAGE_ORDER: list[StageId] = [
     StageId.DRAFT,
     StageId.PROMPT_BUILD,
-    StageId.CONCEPT_GENERATE,
     StageId.CONCEPT_REVIEW,
     StageId.MAGNIFIC_UPREZ,
     StageId.IMAGE_PREP,
@@ -80,6 +78,7 @@ AIRCRAFT_STAGE_ORDER: list[StageId] = [
 ]
 
 MESHY_WORKFLOW_STAGE_ORDER: list[StageId] = [
+    StageId.MAGNIFIC_UPREZ,
     StageId.IMAGE_PREP,
     StageId.MESHY_I2D,
     StageId.MESHY_REMESH,

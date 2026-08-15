@@ -17,6 +17,16 @@ from asset_assembly_automator.core.output_paths import (
 from asset_assembly_automator.core.state_machine import StageId
 
 
+def meshy_workflow_start_stage(metadata: dict[str, Any] | None) -> StageId:
+    """After Save/approval: Magnific uprez (if enabled) then image_prep → Meshy."""
+    meta = metadata or {}
+    enabled = bool(meta.get("magnific_enabled", True))
+    already = bool(meta.get("magnific_already_applied") or meta.get("magnific_output_path"))
+    if enabled and not already:
+        return StageId.MAGNIFIC_UPREZ
+    return StageId.IMAGE_PREP
+
+
 def find_workflow_pipeline(db: Database, project_id: int, asset_name: str) -> int | None:
     """Return an in-progress meshy_drop pipeline id for this project/asset, if any."""
     for pipe in db.list_pipelines_for_project(project_id, workflow="meshy_drop"):
@@ -81,6 +91,11 @@ def bootstrap_meshy_pipeline(
     poly_budget: str = "hero",
     texture_prompt: str = "",
     existing_pipeline_id: int | None = None,
+    magnific_enabled: bool | None = None,
+    magnific_upscale_mode: str | None = None,
+    magnific_upscale_scale_factor: str | None = None,
+    magnific_upscale_flavor: str | None = None,
+    magnific_already_applied: bool = False,
 ) -> int:
     """Copy dropped art into TPose/, record assets + metadata, return pipeline id."""
     source = Path(image_path).resolve()
@@ -120,6 +135,15 @@ def bootstrap_meshy_pipeline(
         "selected_concept_provider": "import",
         "source_drop_path": str(source),
     }
+    if magnific_enabled is not None:
+        metadata["magnific_enabled"] = magnific_enabled
+    if magnific_upscale_mode:
+        metadata["magnific_upscale_mode"] = magnific_upscale_mode
+    if magnific_upscale_scale_factor:
+        metadata["magnific_upscale_scale_factor"] = magnific_upscale_scale_factor
+    if magnific_upscale_flavor:
+        metadata["magnific_upscale_flavor"] = magnific_upscale_flavor
+    metadata["magnific_already_applied"] = bool(magnific_already_applied)
 
     dirs = get_output_dirs(db, pipeline_id)
     pipe_ref = db.get_pipeline(pipeline_id)
@@ -130,6 +154,8 @@ def bootstrap_meshy_pipeline(
     approved.parent.mkdir(parents=True, exist_ok=True)
     copy2(source, approved)
     metadata["source_image_path"] = str(approved)
+    if magnific_already_applied:
+        metadata["magnific_output_path"] = str(approved)
 
     existing_tpose = db.get_assets(pipeline_id, "tpose")
     import_assets = [
@@ -173,5 +199,13 @@ def bootstrap_meshy_pipeline(
             metadata={"role": "source_drop", "original_path": str(source)},
         )
 
-    db.update_pipeline_stage(pipeline_id, StageId.IMAGE_PREP.value, metadata=metadata)
+    merged = {**(pipe_ref.metadata or {}), **metadata}
+    if not magnific_already_applied:
+        merged.pop("magnific_output_path", None)
+        merged.pop("magnific_task_id", None)
+    db.update_pipeline_stage(
+        pipeline_id,
+        meshy_workflow_start_stage(merged).value,
+        metadata=merged,
+    )
     return pipeline_id
