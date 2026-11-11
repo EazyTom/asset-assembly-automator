@@ -4,7 +4,7 @@ Durable spec for the **v0.2** enhancement track. Implementation history: Cursor 
 
 ---
 
-## Status (v0.2.0)
+## Status (v0.4.0)
 
 **Legend:** ✅ **Complete** · 🔄 **In queue** · ⏸ **Deferred** (Phase 2 / out of scope)
 
@@ -13,14 +13,14 @@ Durable spec for the **v0.2** enhancement track. Implementation history: Cursor 
 | Area | Delivered |
 |------|-----------|
 | **Asset kinds** | `character` / `vehicle` / `aircraft` on `pipelines`; branched stage graph (vehicles/aircraft skip rig/animate) |
-| **Meshy presets** | Quality (`meshy-7`, 8K) vs Game-ready (`smart-topology`); GUI + config; `image_enhancement` toggle |
+| **Meshy presets** | Quality (`meshy-7.1`, 8K, `geometry_resolution`) vs Game-ready (`meshy-t2.5`); optional mesh review / retexture; GUI + config; `image_enhancement` toggle |
 | **Remesh** | Optional; **default off**; skip when disabled (textures come from i2d, not remesh) |
 | **Magnific** | Auto stage `magnific_uprez` **after concept approval**; Workflow **Uprez** button retained |
 | **Concept intake** | Midjourney drop, Magnific, optional Higgsfield; only Meshy required for 3D |
 | **Unity happy path** | UPM `com.assetassembly.import`; `import_request.json` → C# `AaaImportRunner` → `unity_import_result.json` (no agent) |
 | **Unity repair** | Agent CLI (Cursor/Claude) + `unity_import_repair.md` **only on validation failure** |
 | **Unity MCP** | Default **AnkleBreaker** (`unity` / user-unity); **Coplay + Official fallbacks** (Settings / `unity_mcp.bridge`) |
-| **Vehicle / aircraft** | Kind-specific import utilities, `DriveController` / `FlightController` |
+| **Vehicle / aircraft** | Kind-specific import utilities, `DriveController` / `FlightController`, kinematic raycast wheels, AAA Tools menu |
 | **Animator controllers** | Built **in the target project** by C# (`CreateAnimatorControllerAtPath`) — not copied from elsewhere |
 | **Concurrency** | Meshy + Magnific semaphores; Unity import wait-queue (`unity_imports: 1`) |
 | **Logging** | `duration_ms`, `stage_id` on stage rows + logs; Log viewer duration column |
@@ -38,8 +38,8 @@ Durable spec for the **v0.2** enhancement track. Implementation history: Cursor 
 | **Live speed baseline** | Populate speed audit with real `pipeline_timing_stats` from full Quality + Unity runs |
 | **Timing UI** | Workflow/Command Center panel reading `pipeline_timing_stats` (DB ready; GUI not built) |
 | **Command Center `unity_import`** | `s11` runnable from **Meshy Workflow app** only; not auto-chained from Command Center runner |
-| **Provider milestone logs** | More `writer.log()` at Meshy/Higgsfield poll boundaries (AGENTS.md gaps: s01, s03, s07–s10) |
-| **Meshy poll tuning** | Backoff / interval optimization after live timing data |
+| **Provider milestone logs** | More `writer.log()` at Meshy/Higgsfield poll boundaries (s01, s03, s07–s10); log task_id immediately after submit; link `log_entries.stage_id` when extending logging; Higgsfield MCP: log OAuth start/success (not tokens), job IDs, poll outcomes |
+| **Meshy poll tuning** | Done: `Retry-After` polling, 60-min deadline from `created_at`, safe create recovery (see Meshy API notes). Remaining: SSE `/stream` instead of polling |
 | **DB hygiene** | `log_entries` retention; unique active `external_jobs` — see [DB-TIMING.md](DB-TIMING.md) |
 | **Phase 2 stub copy** | Command Center Phase 2 tab may still list `unity_import` as Phase 2 |
 | **End-to-end live validation** | Full run: Unity 6 + AnkleBreaker + open Editor + real Meshy credits |
@@ -55,7 +55,7 @@ Durable spec for the **v0.2** enhancement track. Implementation history: Cursor 
 | **Meshy TCP bridge** | Not planned v1 |
 | **Python UnityMcpClient** | Agent CLI + MCP only — no Python HTTP to Unity bridge |
 | **Force remesh on every Quality job** | Remesh optional; default off |
-| **WheelCollider / full vehicle sim** | Arcade `DriveController` only |
+| **WheelCollider / full vehicle sim** | Kinematic raycast-wheel `DriveController` (AAA Vehicle) |
 | **Agent-authored C# / controllers** | Forbidden — AAA package owns all import tooling |
 
 ---
@@ -123,8 +123,9 @@ XR Pipeline may still contain its own `ShipFlightController`, cockpit HUD, `Vehi
 | Magnific auto-uprez | Stage after concept approval; skippable |
 | Magnific manual Uprez | Workflow button retained |
 | Image prep | Downscale with Quality-aware caps (4096 px / ~18–20 MB); preserve Magnific detail |
-| Meshy Quality | `meshy-7`, `texture_resolution` 2k/4k/8k (default 8k), `should_remesh=false` on i2d |
-| Meshy Game-ready | `smart-topology` / `meshy-t2`, polycount slider; remesh always skip |
+| Meshy Quality | `meshy-7.1`, `texture_resolution` 2k/4k/8k (default 8k), `geometry_resolution`, `should_remesh=false` on i2d |
+| Meshy Game-ready | `smart-topology` / `meshy-t2.5`, polycount slider (to 30k); remesh always skip |
+| Mesh review | Optional gate after i2d: retexture variants, approve one for remesh / rig / export |
 | Image enhancement | Toggle on both presets (default on) |
 | Remesh stage | In graph; immediate skip when disabled; Quality-only when enabled |
 | Character branch | Optional remesh → rig → animate (Idle3/4/12 + Walk/Run from Meshy) |
@@ -220,7 +221,7 @@ Source: [`unity_package/com.assetassembly.import/`](../unity_package/com.assetas
 
 | Path | Role |
 |------|------|
-| `package.json` | UPM identity `com.assetassembly.import` v0.2.0 |
+| `package.json` | UPM identity `com.assetassembly.import` v0.3.0 |
 | `Editor/AaaImportRunner.cs` | Watcher: `import_request.json` → Import + Validate → `unity_import_result.json` |
 | `Editor/CharacterManifestImportUtility.cs` | Humanoid import; **creates** `{slug}_Controller.controller` |
 | `Editor/VehicleManifestImportUtility.cs` | Vehicle import + `DriveController` |
@@ -299,12 +300,20 @@ AAA Python must **not** call the Unity Editor HTTP bridge (`http://127.0.0.1:789
 
 ## Meshy API notes
 
-- **Quality:** `ai_model=meshy-7`, `texture_resolution=8k` (or 2k/4k), `should_remesh=false` on i2d. Drop deprecated `hd_texture` when `texture_resolution` is set.
-- **Game-ready:** `model_type=smart-topology`, `ai_model=meshy-t2`, `target_polycount` 100–15000.
-- No `remove_lighting` on meshy-7 (meshy-6 only).
+- **Quality:** `ai_model=meshy-7.1` (what `latest` resolves to; `meshy-7` is deprecated), `texture_resolution=8k` (or 2k/4k), `should_remesh=false` on i2d. Drop deprecated `hd_texture` when `texture_resolution` is set.
+- **Geometry detail:** `geometry_resolution` standard / 2k / 4k (+5 credits; 4k needs meshy-7.1 and a single image). Replaces deprecated `ultra_mode` (`ultra_mode: true` maps to 2k).
+- **Game-ready:** `model_type=smart-topology`, `ai_model=meshy-t2.5` (100–30000) or `meshy-t2` (100–15000; always used for multi-image). `lowpoly` / `meshy-t1` were retired by Meshy.
+- No `remove_lighting` on meshy-7.x (meshy-6 only).
 - 8K costs **15** credits; PBR maps at 8K are 4K; no emission map at 8K.
 - Textures: `should_texture` + `texture_resolution` on Image-to-3D — **not** remesh.
 - Remesh job: topology/polycount only; optional; Game-ready always skips.
+- **API version:** `meshy.api_version` defaults to **v1**. Set `v2` (or `AAA_MESHY__API_VERSION=v2`) after a real image-to-3D and retexture have been compared. v2 creates use `/openapi/v2/...` and return `id`. Reads, polls, and cancel use `GET`/`DELETE /openapi/v2/tasks/{id}` (plus `/stream`). Results live under `output`; the client copies non-null URLs up. Do not send removed v1 parameters (`model_type`, `hd_texture`, `ultra_mode`, `remove_lighting`) — v2 answers 400 `parameter_unknown` and creates no task. v2 image-to-3D sends `texture_model` (default `meshy-7`) when texturing, and always sends `target_formats`. v2 retexture sends `texture_prompt` or `texture_image_url`, `texture_model`, and `uv_mode` (`preserve` / `regenerate`). Models stay pinned to `meshy-7.1` and `meshy-t2.5`.
+- **Task outputs:** v1 i2d / remesh / retexture put `model_urls`, `texture_urls`, `thumbnail_url` at the top level; v1 rigging / animation nest them under `result`. v2 nests them under `output` and uses `null` for missing URLs. `task_output()` / `normalize_task()` hide that split.
+- **Retries:** create calls are never blindly retried. 4xx = no task (including v2 `parameter_unknown` / `parameter_invalid_value`); 429 waits `Retry-After`; timeout / 5xx waits `create_recovery_wait_seconds`, lists recent tasks (`data` on v2), adopts exactly one new unclaimed task, else creates once more. v2 status waits follow the task stream and fall back to polling. Polls wait `Retry-After` (default 5 s) up to `poll_timeout_seconds` (60 min) from the task's `created_at`; failed status checks are not task failures. A task that FAILS with `task_error.type` timeout / service_unavailable / server_error is refunded and re-created `transient_task_retries` times. Cancel of a v2 task that is still `PENDING` sends `DELETE /openapi/v2/tasks/{id}`.
+- **Credits:** `external_jobs.credits_used` comes from each task's `consumed_credits`.
+- **Retexture / mesh review:** `meshy.mesh_review_gate` (or the per-pipeline checkbox) pauses at `mesh_review` after i2d. `meshy_retexture` creates variants (`retexture_ai_model: meshy-7`; Retexture rejects 7.1; ~10 credits, 15 at 8K; prompt ≤ 800 chars or a style image) from the i2d mesh. Approving sets `metadata.mesh_source`, which remesh / rig / download use. CLI: `aaa retexture`, `aaa mesh-variants`, `aaa approve-mesh`.
+- **Animation library:** v2 tries `GET /openapi/v2/animations/library`, then `GET /openapi/v1/animations/library` (free, authenticated); public `web/public/animations/resources` fallback (`result.list`). Default idles Idle 3 / 4 / 12 = action ids 243 / 244 / 252. On v2 those three clips run together, up to `max_concurrent_jobs`.
+- **Meshy MCP (Cursor chat):** `.cursor/mcp.json` runs `npx @meshy-ai/meshy-mcp-server` with `MESHY_API_KEY` (gitignored). MCP-created tasks are not in SQLite — use for exploration only. The workflow window and `aaa retexture` produce tracked variants.
 
 ---
 

@@ -21,7 +21,12 @@ from PyQt6.QtWidgets import (
 
 from asset_assembly_automator import __version__
 from asset_assembly_automator.core.db.models import Database, local_database_path
-from asset_assembly_automator.core.output_paths import get_output_dirs
+from asset_assembly_automator.core.output_paths import (
+    get_output_dirs,
+    pipeline_character_slug,
+    preview_png_path,
+)
+from asset_assembly_automator.core.state_machine import mesh_review_enabled
 from asset_assembly_automator.gui.controller import PipelineController
 from asset_assembly_automator.gui.dialogs.getting_started import GettingStartedDialog
 from asset_assembly_automator.gui.dialogs.new_pipeline_dialog import NewPipelineDialog
@@ -33,10 +38,12 @@ from asset_assembly_automator.gui.views.concept_compare_view import ConceptCompa
 from asset_assembly_automator.gui.views.dashboard_view import DashboardView
 from asset_assembly_automator.gui.views.focused_wizard_view import FocusedWizardView
 from asset_assembly_automator.gui.views.log_viewer import LogViewer
+from asset_assembly_automator.gui.views.mesh_review_view import MeshReviewView
 from asset_assembly_automator.gui.views.phase2_stub_view import Phase2StubView
 from asset_assembly_automator.gui.views.prompt_builder_view import PromptBuilderView
 from asset_assembly_automator.gui.widgets.pipeline_stepper import PipelineStepper
 from asset_assembly_automator.orchestrator.watchers import ArtifactWatcher
+from asset_assembly_automator.stages.s05c_mesh_review import mesh_variants
 from asset_assembly_automator.workflow.maintenance import (
     delete_output_directory,
     reset_application_database,
@@ -89,6 +96,11 @@ class MainWindow(QMainWindow):
         self.concept_compare.approveRequested.connect(self._on_approve_concept)
         self.concept_compare.refineRequested.connect(self._on_refine_concept)
         workflow.addTab(self.concept_compare, "Concepts")
+        self.mesh_review = MeshReviewView()
+        self.mesh_review.retextureRequested.connect(self._on_retexture)
+        self.mesh_review.approveRequested.connect(self._on_approve_mesh)
+        self.mesh_review.reviewToggled.connect(self._on_mesh_review_toggled)
+        workflow.addTab(self.mesh_review, "Mesh Review")
         workflow.addTab(AnimationPickerView(), "Animations")
         workflow.addTab(Phase2StubView(), "Phase 2")
         work_split.addWidget(workflow)
@@ -190,8 +202,41 @@ class MainWindow(QMainWindow):
             self.wizard.set_pipeline(pipe.asset_name, pipe.current_stage)
             assets = self.db.get_assets(pipe.id, "concept")
             self.concept_compare.load_assets(assets)
+            self._load_mesh_review(pipe)
             self.prompt_builder.set_pipeline_context(pipe.asset_name, pipe.metadata)
             self.log_viewer.load_pipeline(pipe.id, pipe.asset_name)
+
+    def _load_mesh_review(self, pipe) -> None:
+        try:
+            dirs = get_output_dirs(self.db, pipe.id)
+            original = preview_png_path(dirs, pipeline_character_slug(pipe))
+        except ValueError:
+            original = None
+        self.mesh_review.load(
+            pipe,
+            mesh_variants(self.db, pipe.id),
+            original_preview=original if original and original.is_file() else None,
+            review_enabled=mesh_review_enabled(pipe),
+        )
+
+    def _on_retexture(self, prompt: str, style_image: str) -> None:
+        if self._selected_pipeline is None:
+            return
+        self.controller.schedule_retexture(
+            self._selected_pipeline,
+            self.loop,
+            prompt=prompt,
+            style_image_path=style_image or None,
+        )
+
+    def _on_approve_mesh(self, task_id: str) -> None:
+        if self._selected_pipeline is None:
+            return
+        self.controller.schedule_approve_mesh(self._selected_pipeline, self.loop, task_id=task_id)
+
+    def _on_mesh_review_toggled(self, enabled: bool) -> None:
+        if self._selected_pipeline is not None:
+            self.controller.set_mesh_review_enabled(self._selected_pipeline, enabled)
 
     def _on_progress(self, pipeline_id: int, pct: int, stage: str) -> None:
         if pipeline_id == self._selected_pipeline:
@@ -206,6 +251,7 @@ class MainWindow(QMainWindow):
             if pipe:
                 self.stepper.set_stage(pipe.current_stage)
                 self.wizard.set_pipeline(pipe.asset_name, pipe.current_stage)
+                self._load_mesh_review(pipe)
 
     def _on_log_entry(self, pipeline_id: int, entry: dict) -> None:
         if pipeline_id == self._selected_pipeline:

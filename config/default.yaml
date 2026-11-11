@@ -1,6 +1,6 @@
 app:
   name: Asset Assembly Automator
-  version: "0.2.0"
+  version: "0.4.0"
 
 paths:
   app_data: "%LOCALAPPDATA%/AssetAssemblyAutomator"
@@ -9,12 +9,40 @@ paths:
 
 meshy:
   base_url: "https://api.meshy.ai"
-  ai_model: meshy-7
+  # v1 until a real image-to-3D and retexture are compared by hand. v2 is implemented.
+  # Process override: AAA_MESHY__API_VERSION=v2
+  api_version: v1
+  # meshy-7.1 is what "latest" resolves to today; pinned so results stay reproducible.
+  ai_model: meshy-7.1
+  # Sent as texture_model on v2 image-to-3D when should_texture is true.
+  texture_model: meshy-7
   model_type: standard
   default_preset: quality
   default_texture_resolution: 8k
+  # standard | 2k | 4k (4k needs meshy-7.1, single image only; +5 credits for 2k/4k).
+  # Replaces the deprecated ultra_mode flag (ultra_mode: true still maps to 2k).
+  geometry_resolution: standard
   ultra_mode: false
   smart_topology: auto
+  # Game-ready preset model: meshy-t2.5 (100–30k polys) or meshy-t2 (100–15k).
+  # Multi-image always uses meshy-t2.
+  smart_topology_model: meshy-t2.5
+  # Retexture rejects meshy-7.1; meshy-7 is its newest model.
+  retexture_ai_model: meshy-7
+  retexture_enable_original_uv: true
+  # Pause at the mesh_review gate after image-to-3D so you can retexture and pick a variant.
+  mesh_review_gate: false
+  # Request handling. Create calls are never blindly retried: after a timeout or 5xx the
+  # client waits create_recovery_wait_seconds, checks Meshy's task list, and only then
+  # creates again. Polls wait Retry-After (poll_interval_seconds if absent) and give up
+  # poll_timeout_seconds after the task's created_at; the task keeps running on Meshy.
+  request_max_attempts: 5
+  poll_timeout_seconds: 3600
+  poll_interval_seconds: 5
+  create_recovery_wait_seconds: 60
+  # Re-create a task this many times when it FAILS with a transient task_error
+  # (timeout / service_unavailable / server_error). Failed tasks are refunded.
+  transient_task_retries: 1
   i2d_target_formats: [fbx, glb]
   pose_mode: t-pose
   topology: quad

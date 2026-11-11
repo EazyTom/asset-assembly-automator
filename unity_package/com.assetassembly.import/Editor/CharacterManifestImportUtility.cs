@@ -640,7 +640,7 @@ public static class CharacterManifestImportUtility
         };
 
         foreach (var idleState in new[] { idle3, idle4, idle12 })
-            AddIdleTransitions(idleState);
+            AddIdleTransitions(root, idleState);
 
         AddGaitTransition(idle3, walk, 1);
         AddGaitTransition(idle4, walk, 1);
@@ -654,9 +654,8 @@ public static class CharacterManifestImportUtility
         return controller;
     }
 
-    private static void AddIdleTransitions(AnimatorState from)
+    private static void AddIdleTransitions(AnimatorStateMachine root, AnimatorState from)
     {
-        var root = from.stateMachine;
         AnimatorState idle3 = null;
         AnimatorState idle4 = null;
         AnimatorState idle12 = null;

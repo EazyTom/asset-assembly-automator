@@ -36,8 +36,10 @@ def cmd_create_pipeline(args: argparse.Namespace) -> int:
         args.asset_name,
         poly_budget=args.poly_budget,
         multi_view=args.multi_view,
+        asset_kind=args.asset_kind,
+        import_profile=args.import_profile or "",
     )
-    print(f"Created pipeline {plid}: {args.asset_name}")
+    print(f"Created pipeline {plid}: {args.asset_name} ({args.asset_kind})")
     return 0
 
 
@@ -48,6 +50,48 @@ async def cmd_run(args: argparse.Namespace) -> int:
         result = await runner.run_stage(args.pipeline_id, StageId(args.stage))
     else:
         result = await runner.run_pipeline(args.pipeline_id, auto=not args.manual)
+    print(result)
+    return 0 if result.success else 1
+
+
+async def cmd_retexture(args: argparse.Namespace) -> int:
+    configure_logging(verbose=args.verbose)
+    runner = PipelineRunner(dry_run=args.dry_run, verbose=args.verbose)
+    result = await runner.run_stage(
+        args.pipeline_id,
+        StageId.MESHY_RETEXTURE,
+        prompt=args.prompt,
+        style_image_path=args.style_image,
+    )
+    print(result)
+    return 0 if result.success else 1
+
+
+async def cmd_mesh_variants(args: argparse.Namespace) -> int:
+    from asset_assembly_automator.stages.s05c_mesh_review import mesh_variants
+
+    db = Database()
+    pipe = db.get_pipeline(args.pipeline_id)
+    if not pipe:
+        print(f"Pipeline {args.pipeline_id} not found")
+        return 1
+    approved = (pipe.metadata.get("mesh_source") or {}).get("task_id")
+    print(f"Pipeline {pipe.id} at stage {pipe.current_stage}")
+    for job in mesh_variants(db, pipe.id):
+        meta = job.get("metadata") or {}
+        mark = "*" if job["task_id"] == approved else " "
+        desc = meta.get("prompt") or meta.get("style_image_path") or ""
+        print(f"{mark} {job['task_id']}  {job['task_type']:<12} {desc}")
+    return 0
+
+
+async def cmd_approve_mesh(args: argparse.Namespace) -> int:
+    configure_logging(verbose=args.verbose)
+    runner = PipelineRunner(dry_run=args.dry_run, verbose=args.verbose)
+    runner.db.update_pipeline_stage(args.pipeline_id, StageId.MESH_REVIEW.value, status="active")
+    result = await runner.run_stage(args.pipeline_id, StageId.MESH_REVIEW, task_id=args.task_id)
+    if result.success and args.continue_run:
+        result = await runner.run_pipeline(args.pipeline_id)
     print(result)
     return 0 if result.success else 1
 
@@ -97,9 +141,19 @@ def build_parser() -> argparse.ArgumentParser:
     proj_p.add_argument("--unity", default=None)
     proj_p.set_defaults(func=cmd_create_project)
 
-    pipe_p = sub.add_parser("create-pipeline", help="Create a character pipeline")
+    pipe_p = sub.add_parser(
+        "create-pipeline",
+        help="Create a pipeline (AAA Character / AAA Vehicle / AAA Aircraft)",
+    )
     pipe_p.add_argument("project_id", type=int)
     pipe_p.add_argument("asset_name")
+    pipe_p.add_argument(
+        "--asset-kind",
+        default="character",
+        choices=["character", "vehicle", "aircraft"],
+        help="AAA Character, AAA Vehicle, or AAA Aircraft",
+    )
+    pipe_p.add_argument("--import-profile", default="", help="Override import profile")
     pipe_p.add_argument("--poly-budget", default="hero", choices=["hero", "npc", "crowd"])
     pipe_p.add_argument("--multi-view", action="store_true")
     pipe_p.set_defaults(func=cmd_create_pipeline)
@@ -111,6 +165,35 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--verbose", action="store_true")
     run_p.add_argument("--manual", action="store_true", help="Stop at manual gates")
     run_p.set_defaults(func=lambda a: asyncio.run(cmd_run(a)))
+
+    retex_p = sub.add_parser(
+        "retexture", help="Create a Meshy retexture variant of the pipeline's i2d mesh"
+    )
+    retex_p.add_argument("--pipeline-id", type=int, required=True)
+    retex_p.add_argument("--prompt", default=None, help="Texture description (max 800 chars)")
+    retex_p.add_argument("--style-image", default=None, help="Style reference image path")
+    retex_p.add_argument("--dry-run", action="store_true")
+    retex_p.add_argument("--verbose", action="store_true")
+    retex_p.set_defaults(func=cmd_retexture)
+
+    variants_p = sub.add_parser("mesh-variants", help="List approvable meshes (* = approved)")
+    variants_p.add_argument("--pipeline-id", type=int, required=True)
+    variants_p.set_defaults(func=cmd_mesh_variants)
+
+    approve_p = sub.add_parser(
+        "approve-mesh", help="Approve a mesh variant at mesh_review and continue"
+    )
+    approve_p.add_argument("--pipeline-id", type=int, required=True)
+    approve_p.add_argument("--task-id", default=None, help="Variant task id (default: original)")
+    approve_p.add_argument(
+        "--no-continue",
+        dest="continue_run",
+        action="store_false",
+        help="Only record the approval; do not run remesh/rig/download",
+    )
+    approve_p.add_argument("--dry-run", action="store_true")
+    approve_p.add_argument("--verbose", action="store_true")
+    approve_p.set_defaults(func=cmd_approve_mesh)
 
     watch_p = sub.add_parser("watch", help="Watch import/output folders")
     watch_p.add_argument("--pipeline-id", type=int)

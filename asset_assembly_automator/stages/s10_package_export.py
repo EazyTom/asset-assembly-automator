@@ -7,19 +7,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from asset_assembly_automator.core.db.models import StageResult
-from asset_assembly_automator.core.output_paths import chr_file_prefix, pipeline_output_slug
-from asset_assembly_automator.core.state_machine import StageId
+from asset_assembly_automator.core.output_paths import asset_file_prefix, pipeline_output_slug
+from asset_assembly_automator.core.state_machine import StageId, asset_kind_for_pipeline
 from asset_assembly_automator.stages._base import run_stage, stage_argparser
 
 
 async def _run(ctx, db, dirs, writer):
     pipe = db.get_pipeline(ctx.pipeline_id)
+    asset_kind = asset_kind_for_pipeline(pipe)
     output_slug = pipeline_output_slug(pipe)
-    zip_name = f"{chr_file_prefix(output_slug)}_UnityImport_v01.zip"
+    zip_name = f"{asset_file_prefix(asset_kind, output_slug)}_UnityImport_v01.zip"
     zip_path = dirs["root"] / zip_name
 
     files_to_zip: list[Path] = []
-    for sub in ("Source", "Animations", "Textures", "TPose", "Concept"):
+    for sub in ("Source", "Animations", "Textures", "TPose", "Concept", "Approved"):
         d = dirs["root"] / sub if sub != "Source" else dirs["source"]
         if d.exists():
             files_to_zip.extend(p for p in d.rglob("*") if p.is_file())
@@ -40,6 +41,7 @@ async def _run(ctx, db, dirs, writer):
     manifest = {
         "pipeline_id": ctx.pipeline_id,
         "asset_name": pipe.asset_name,
+        "asset_kind": asset_kind,
         "generated_at": datetime.now(UTC).isoformat(),
         "metadata": pipe.metadata,
         "prompts": [dict(p) for p in prompts],

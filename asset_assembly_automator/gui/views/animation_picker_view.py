@@ -10,9 +10,15 @@ class AnimationPickerView(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Meshy animation library"))
+        browse = QLabel(
+            "Browse the Meshy animation library. "
+            "Pipeline runs still use the configured idles (Idle 3, 4, and 12) "
+            "unless selections are already stored for that pipeline."
+        )
+        browse.setWordWrap(True)
+        layout.addWidget(browse)
         search_row = QHBoxLayout()
-        self.search_btn = QPushButton("Load defaults + search 'casual walk'")
+        self.search_btn = QPushButton("Load idles + search 'casual walk'")
         search_row.addWidget(self.search_btn)
         layout.addLayout(search_row)
         self.list = QListWidget()

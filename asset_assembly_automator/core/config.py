@@ -64,12 +64,27 @@ class UnityMcpSettings(BaseSettings):
 
 class MeshySettings(BaseSettings):
     base_url: str = "https://api.meshy.ai"
-    ai_model: str = "meshy-7"
+    # v1 until a real image-to-3D and retexture are compared. Override with AAA_MESHY__API_VERSION.
+    api_version: Literal["v1", "v2"] = "v1"
+    ai_model: str = "meshy-7.1"
+    # v2 texture_model when should_texture is true. v1 still picks textures from ai_model.
+    texture_model: str = "meshy-7"
     model_type: str = "standard"
     default_preset: Literal["quality", "game_ready"] = "quality"
     default_texture_resolution: Literal["2k", "4k", "8k"] = "8k"
+    geometry_resolution: Literal["standard", "2k", "4k"] = "standard"
+    # Deprecated by Meshy in favor of geometry_resolution; true maps to "2k".
     ultra_mode: bool = False
     smart_topology: Literal["auto", "off", "lowpoly"] = "auto"
+    smart_topology_model: Literal["meshy-t2", "meshy-t2.5"] = "meshy-t2.5"
+    retexture_ai_model: str = "meshy-7"
+    retexture_enable_original_uv: bool = True
+    mesh_review_gate: bool = False
+    request_max_attempts: int = 5
+    poll_timeout_seconds: int = 3600
+    poll_interval_seconds: float = 5.0
+    create_recovery_wait_seconds: float = 60.0
+    transient_task_retries: int = 1
     i2d_target_formats: list[str] = Field(default_factory=lambda: ["fbx", "glb"])
     pose_mode: str = "t-pose"
     topology: str = "quad"
@@ -156,7 +171,7 @@ class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AAA_", extra="ignore")
 
     name: str = "Asset Assembly Automator"
-    version: str = "0.2.0"
+    version: str = "0.4.0"
 
 
 class Settings(BaseSettings):

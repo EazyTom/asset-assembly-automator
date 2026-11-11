@@ -1,0 +1,24 @@
+{
+    "name": "AssetAssembly.Import.Runtime",
+    "rootNamespace": "AssetAssembly.Import.Runtime",
+    "references": [
+        "Unity.InputSystem",
+        "Unity.XR.CoreUtils",
+        "Unity.XR.Interaction.Toolkit"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.xr.interaction.toolkit",
+            "expression": "",
+            "define": "AAA_HAS_XRI"
+        }
+    ],
+    "noEngineReferences": false
+}

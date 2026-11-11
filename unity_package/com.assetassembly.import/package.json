@@ -1,10 +1,13 @@
 {
   "name": "com.assetassembly.import",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "displayName": "Asset Assembly Import",
-  "description": "Deterministic Meshy import, validation, and runtime controllers for AAA pipelines.",
+  "description": "Deterministic Meshy import, validation, and runtime controllers for AAA pipelines (Character, Vehicle, Aircraft).",
   "unity": "2021.3",
   "author": {
     "name": "Asset Assembly Automator"
+  },
+  "dependencies": {
+    "com.unity.inputsystem": "1.7.0"
   }
 }

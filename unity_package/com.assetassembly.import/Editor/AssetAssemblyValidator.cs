@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.IO;
+using AssetAssembly.Import.Runtime;
 using UnityEditor;
 using UnityEngine;
 
@@ -30,7 +31,7 @@ namespace AssetAssembly.Import.Editor
             };
             var root = $"Assets/{folder}/{slug}";
             var prefabDir = $"{root}/Prefabs";
-            if (!AssetDatabase.IsValidFolder(root.Replace("Assets/", "Assets/")))
+            if (!Directory.Exists(ToAbsolute(root)))
             {
                 errors.Add($"Missing asset root: {root}");
             }
@@ -39,21 +40,44 @@ namespace AssetAssembly.Import.Editor
                 checks.Add("asset_root_exists");
             }
 
-            var prefab = Directory.Exists(Path.Combine(Application.dataPath, "..", prefabDir))
-                ? Directory.GetFiles(Path.Combine(Application.dataPath, "..", prefabDir), "*.prefab")
+            string[] prefabFiles = Directory.Exists(ToAbsolute(prefabDir))
+                ? Directory.GetFiles(ToAbsolute(prefabDir), "*.prefab")
                 : Array.Empty<string>();
-            if (prefab.Length == 0)
+            GameObject prefabRoot = null;
+            if (prefabFiles.Length == 0)
+            {
                 errors.Add("Prefab missing under Prefabs/");
+            }
             else
+            {
                 checks.Add("prefab_present");
+                prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(
+                    $"{prefabDir}/{Path.GetFileName(prefabFiles[0])}");
+            }
 
             if (assetKind == "character")
             {
                 var meshPath = $"{root}/Source/Character_output.fbx";
                 if (!File.Exists(ToAbsolute(meshPath)))
+                {
                     errors.Add("Character rig FBX missing");
+                }
                 else
+                {
                     checks.Add("rig_fbx_present");
+                }
+            }
+            else
+            {
+                var sourceDir = ToAbsolute($"{root}/Source");
+                if (!Directory.Exists(sourceDir) || Directory.GetFiles(sourceDir, "*.fbx").Length == 0)
+                {
+                    errors.Add("Source FBX missing");
+                }
+                else
+                {
+                    checks.Add("source_fbx_present");
+                }
             }
 
             var texDir = ToAbsolute($"{root}/Textures");
@@ -76,31 +100,60 @@ namespace AssetAssembly.Import.Editor
                 errors.Add("Textures folder missing");
             }
 
+            if (prefabRoot != null)
+            {
+                ValidateController(prefabRoot, assetKind, checks, errors);
+            }
+
             result.checks = checks.ToArray();
             result.errors = errors.ToArray();
             result.ok = errors.Count == 0;
             return result;
         }
 
-        [MenuItem("Tools/AAA/Validate assembled asset...")]
-        public static void ValidateMenu()
+        static void ValidateController(
+            GameObject prefabRoot,
+            string assetKind,
+            System.Collections.Generic.List<string> checks,
+            System.Collections.Generic.List<string> errors)
         {
-            var slug = EditorUtility.DisplayDialogComplex(
-                "Validate",
-                "Enter slug in console log after picking from Project window.",
-                "OK",
-                "Cancel",
-                "") == 0
-                ? Selection.activeObject != null ? Selection.activeObject.name : ""
-                : "";
-            if (string.IsNullOrWhiteSpace(slug))
+            switch (assetKind)
             {
-                Debug.LogWarning("[AAA] Select a prefab or enter slug manually.");
-                return;
+                case "aircraft":
+                    if (prefabRoot.GetComponentInChildren<FlightController>() == null)
+                    {
+                        errors.Add($"{AaaLabels.Aircraft} requires FlightController on rig root");
+                    }
+                    else
+                    {
+                        checks.Add("flight_controller_present");
+                    }
+
+                    break;
+                case "vehicle":
+                    var drive = prefabRoot.GetComponentInChildren<DriveController>();
+                    if (drive == null)
+                    {
+                        errors.Add($"{AaaLabels.Vehicle} requires DriveController on rig root");
+                    }
+                    else
+                    {
+                        checks.Add("drive_controller_present");
+                        if (drive.FrontLeft.localPosition == Vector3.zero)
+                        {
+                            errors.Add("Wheel anchors not configured");
+                        }
+                        else
+                        {
+                            checks.Add("wheel_anchors_present");
+                        }
+                    }
+
+                    break;
+                default:
+                    checks.Add("character_prefab");
+                    break;
             }
-            var result = Validate(slug, "character");
-            Debug.Log(result.ok ? "[AAA] Validation passed" : "[AAA] Validation failed: " +
-                string.Join("; ", result.errors));
         }
 
         static string ToAbsolute(string assetPath) =>

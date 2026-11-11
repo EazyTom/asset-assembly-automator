@@ -11,6 +11,7 @@ from asset_assembly_automator.core.db.models import Database
 MESHY_STAGE_NAMES = frozenset(
     {
         "meshy_i2d",
+        "meshy_retexture",
         "meshy_remesh",
         "meshy_rig",
         "meshy_animate",

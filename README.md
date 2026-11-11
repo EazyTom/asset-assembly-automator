@@ -2,7 +2,7 @@
 
 ![AAA screenshot](AAA-screenshot-202.png)
 
-**Version 0.2.0** — Python + PyQt6 orchestrator for **Character / Vehicle / Aircraft** pipelines: approved concept (Midjourney drop, Magnific, or optional Higgsfield) → optional Magnific uprez → Meshy **Quality (meshy-7)** or **Game-ready** → FBX.zip → **deterministic Unity import** (`com.assetassembly.import` UPM; agent/MCP **only on validation failure**).
+**Version 0.4.0** — Python + PyQt6 orchestrator for **Character / Vehicle / Aircraft** pipelines: approved concept (Midjourney drop, Magnific, or optional Higgsfield) → optional Magnific uprez → Meshy **Quality (meshy-7.1)** or **Game-ready (meshy-t2.5)** → optional mesh review / retexture → FBX.zip → **deterministic Unity import** (`com.assetassembly.import` UPM; agent/MCP **only on validation failure**).
 
 Enhancement track and capability catalog: [`docs/ENHANCEMENTS.md`](docs/ENHANCEMENTS.md).
 
@@ -180,7 +180,7 @@ flowchart TD
         QC[meshy_qc s09b]
         ZIP[package_export s10]
     end
-    subgraph unity [Unity import v0.2]
+    subgraph unity [Unity import]
         UI[unity_import s11 C# UPM]
     end
     PB --> CR
@@ -189,7 +189,9 @@ flowchart TD
     IP --> TA
     IP --> I2D
     TA --> I2D
-    I2D --> RM
+    I2D -->|mesh review off| RM
+    I2D -.->|mesh review on| MR[mesh_review]
+    MR --> RM
     RM -->|character| RG --> AN --> DL
     RM -->|vehicle or aircraft| DL
     DL --> QC --> ZIP
@@ -197,11 +199,11 @@ flowchart TD
     ZIP -.->|Workflow Import to Unity| UI
 ```
 
-**Asset kinds:** `character` (rig + animate), `vehicle` / `aircraft` (skip rig/animate). **Remesh** optional, default **off**. **Presets:** Quality (`meshy-7`, 8K) vs Game-ready (`smart-topology`).
+**Asset kinds:** `character` (rig + animate), `vehicle` / `aircraft` (skip rig/animate). **Remesh** optional, default **off**. **Presets:** Quality (`meshy-7.1`, 8K, optional `geometry_resolution`) vs Game-ready (`meshy-t2.5`, up to 30k polys; multi-image uses `meshy-t2`).
 
-**Manual gate (Command Center):** `concept_review` stops auto-run so you can **preview native** Midjourney / drop / optional Higgs or Magnific generate images. Approve, then Magnific uprez runs, then Meshy.
+**Manual gates:** `concept_review` stops auto-run so you can **preview native** Midjourney / drop / optional Higgs or Magnific images. Approve, then Magnific uprez runs, then Meshy. Optional `mesh_review` (per pipeline or `meshy.mesh_review_gate`) pauses after image-to-3D so you can retexture and approve a variant before remesh and rig. Command Center has a **Mesh Review** tab; the workflow window has the same controls under the run buttons. CLI: `aaa retexture`, `aaa mesh-variants`, `aaa approve-mesh`.
 
-**Meshy Workflow app** previews first, **Save** approves, then **Run Meshy** starts at `magnific_uprez` (if enabled) → `image_prep` → `meshy_i2d` … → optional **Import to Unity** (`s11`).
+**Meshy Workflow app** previews first, **Save** approves, then **Run Meshy** starts at `magnific_uprez` (if enabled) → `image_prep` → `meshy_i2d` … → optional mesh review → optional **Import to Unity** (`s11`).
 
 ---
 
@@ -216,7 +218,8 @@ flowchart LR
         ST[PipelineStepper]
         PBV[PromptBuilderView]
         CCV[ConceptCompareView]
-        APV[AnimationPickerView]
+        MRV[MeshReviewView]
+        APV[AnimationPickerView catalog browser]
         LV[LogViewer]
         P2[Phase2StubView]
     end
@@ -225,6 +228,7 @@ flowchart LR
         DZ[DropZone]
         CPP[CharacterPreviewPanel preview first]
         MWS[MeshyWorkflowStepper]
+        MRW[Mesh review / retexture]
         CFG[Project / Unity settings]
         UIP[Unity import prompt editor]
         WLV[LogViewer]
@@ -396,7 +400,7 @@ asset_assembly_automator/
 unity_package/com.assetassembly.import/   # UPM: Editor + Runtime C# (injected into target)
 unity_templates/                          # Legacy Assets/ fallback if package missing
 docs/
-├── ENHANCEMENTS.md        # v0.2 capability catalog + locked decisions
+├── ENHANCEMENTS.md        # capability catalog + locked decisions
 └── DB-TIMING.md           # duration_ms / pipeline_timing_stats
 
 config/
@@ -420,6 +424,9 @@ secrets.env.example        # Template for API keys (copy to user profile)
 .\.venv\Scripts\python.exe -m asset_assembly_automator.cli create-pipeline 1 HeroCourier --poly-budget hero
 .\.venv\Scripts\python.exe -m asset_assembly_automator.cli run --pipeline-id 1 --dry-run
 .\.venv\Scripts\python.exe -m asset_assembly_automator.cli run --pipeline-id 1 --stage meshy_i2d
+.\.venv\Scripts\python.exe -m asset_assembly_automator.cli retexture --pipeline-id 1 --prompt "weathered bronze armor" --dry-run
+.\.venv\Scripts\python.exe -m asset_assembly_automator.cli mesh-variants --pipeline-id 1
+.\.venv\Scripts\python.exe -m asset_assembly_automator.cli approve-mesh --pipeline-id 1 --dry-run
 ```
 
 | Entry point | Module |
@@ -446,7 +453,7 @@ flowchart LR
 
 | Section | Notable keys |
 |---------|----------------|
-| **meshy** | `default_preset` (quality), `ai_model` (meshy-7), `default_texture_resolution` (8k), `image_enhancement`, `should_remesh` (false on i2d), poly budgets (300k), `i2d_max_image_px` (4096), `i2d_max_image_mb` (18), `max_concurrent_jobs` |
+| **meshy** | `api_version` (v1; set v2 or `AAA_MESHY__API_VERSION`), `default_preset` (quality), `ai_model` (meshy-7.1), `texture_model` (meshy-7, v2 only), `geometry_resolution` (standard/2k/4k), `smart_topology_model` (meshy-t2.5), `retexture_ai_model` (meshy-7), `mesh_review_gate` (off), `default_texture_resolution` (8k), `poll_timeout_seconds` (3600), `image_enhancement`, `should_remesh` (false on i2d), poly budgets (300k), `i2d_max_image_px` (4096), `i2d_max_image_mb` (18), `max_concurrent_jobs` |
 | **magnific** | `default_enabled`, `mystic_model`, upscale mode/scale/flavor, `max_concurrent_jobs` |
 | **higgsfield** | `provider` (mcp), `default_image_model` (soul_2), aspect ratio 2:3 |
 | **cursor_cli** / **agent_cli** | Repair/ping only; `provider` cursor\|claude |
@@ -463,7 +470,7 @@ Override in `%USERPROFILE%\.asset_assembly_automator\config.yaml`.
 | **Higgsfield** *(optional)* | MCP adapter (`McpHiggsfieldAdapter`) or REST | `generate_image` for concept — Workflow **Use Higgs** / Command Center `concept_generate`; skip if using MJ drop or Magnific |
 | **Magnific** *(optional)* | REST client (`MagnificClient`) | Mystic text-to-image; Creative + Precision V2 upscaler (workflow **Uprez** + auto stage) |
 | **Midjourney** *(optional)* | Manual + watch-folder import | No API — user generates, watcher imports (Command Center) |
-| **Meshy** *(required for 3D)* | REST client + MCP server | i2d, remesh, rig, animate, download |
+| **Meshy** *(required for 3D)* | REST client + MCP server | i2d, optional retexture, remesh, rig, animate, download. Chat MCP (`npx`, key in gitignored `.cursor/mcp.json`) is exploration only — those tasks are not in SQLite |
 | **Unity 6 + Unity MCP** *(required for import)* | Editor + one MCP bridge | Default AnkleBreaker; Coplay/Official fallbacks; C# happy path + agent repair/cleanup |
 | **Blender ARP** | Stub client | Phase 2 fallback rig |
 
@@ -556,7 +563,7 @@ git push -u origin main
 | **README.md** (this file) | Developers — architecture, GUIs, pipelines, GitHub setup |
 | [ASSET-ASSEMBLY-AUTOMATOR.md](ASSET-ASSEMBLY-AUTOMATOR.md) | Product spec and stage reference |
 | [AAA-WORKFLOW.md](AAA-WORKFLOW.md) | Meshy Workflow app + Concept Image + Unity import |
-| [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md) | v0.2 capability catalog, locked decisions, UPM ownership |
+| [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md) | Capability catalog, locked decisions, UPM ownership |
 | [docs/DB-TIMING.md](docs/DB-TIMING.md) | Stage `duration_ms` and `pipeline_timing_stats` |
 | [AGENTS.md](AGENTS.md) | AI agent guardrails and logging contract |
 | [config/workflows/unity_import_repair.md](config/workflows/unity_import_repair.md) | Agent repair prompt (validation failure) |
@@ -569,7 +576,7 @@ git push -u origin main
 
 | Feature | Status |
 |---------|--------|
-| `unity_import` (s11) | **v0.2 implemented** — C# UPM happy path + agent repair on failure; Workflow app; not auto-chained from Command Center |
+| `unity_import` (s11) | C# UPM happy path + agent repair on failure; Workflow app; not auto-chained from Command Center |
 | Concept Image (Magnific/Higgs in workflow) | **Implemented** in `workflow_main.py` |
 | Asset kinds vehicle / aircraft | **Implemented** — skip rig/animate; kind-specific Unity utilities |
 | World pipeline stages | Schema + GUI stub only |
@@ -581,6 +588,6 @@ git push -u origin main
 
 ## License and version
 
-`asset-assembly-automator` v0.2.0, Python ≥ 3.11, Windows-first (PowerShell launch scripts). See [`pyproject.toml`](pyproject.toml) for package metadata.
+`asset-assembly-automator` v0.4.0, Python ≥ 3.11, Windows-first (PowerShell launch scripts). See [`pyproject.toml`](pyproject.toml) for package metadata.
 
 Licensed under the [MIT License](LICENSE). Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).

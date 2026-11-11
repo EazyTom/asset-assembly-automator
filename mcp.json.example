@@ -2,6 +2,7 @@
   "_comment": "Copy to .mcp.json at repo root (gitignored). AAA defaults to AnkleBreaker (unity/user-unity). Coplay + Official Unity MCP are supported fallbacks — enable ONE bridge at a time. Unity 6 Editor open on target project.",
   "mcpServers": {
     "meshy-mcp-server": {
+      "_comment": "Local only — this file's copy is gitignored. Tasks made via MCP are not tracked in the AAA database.",
       "command": "npx",
       "args": [
         "-y",

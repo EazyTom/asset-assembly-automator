@@ -1,0 +1,25 @@
+{
+    "name": "AssetAssembly.Import.Editor",
+    "rootNamespace": "AssetAssembly.Import.Editor",
+    "references": [
+        "AssetAssembly.Import.Runtime",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.xr.interaction.toolkit",
+            "expression": "",
+            "define": "AAA_HAS_XRI"
+        }
+    ],
+    "noEngineReferences": false
+}

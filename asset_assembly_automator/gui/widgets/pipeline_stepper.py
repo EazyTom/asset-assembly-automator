@@ -17,6 +17,8 @@ _STYLE_STALE = f"color: {STATUS_COLORS['failed']}; font-size: 16px; font-weight:
 STAGE_DISPLAY_LABELS: dict[str, str] = {
     StageId.IMAGE_PREP.value: "Image Prep",
     StageId.MAGNIFIC_UPREZ.value: "Magnific Uprez",
+    StageId.MESH_REVIEW.value: "Mesh Review (optional)",
+    StageId.MESHY_RETEXTURE.value: "Meshy Retexture",
 }
 
 

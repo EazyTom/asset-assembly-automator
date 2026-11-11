@@ -14,6 +14,7 @@ _unity_import_lock: asyncio.Lock | None = None
 MESHY_STAGES = frozenset(
     {
         StageId.MESHY_I2D,
+        StageId.MESHY_RETEXTURE,
         StageId.MESHY_REMESH,
         StageId.MESHY_RIG,
         StageId.MESHY_ANIMATE,

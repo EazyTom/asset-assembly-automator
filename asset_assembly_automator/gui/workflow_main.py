@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices, QFontMetrics
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -287,6 +288,54 @@ class WorkflowWindow(QMainWindow):
         btn_row.addWidget(self.cleanup_unity_btn)
         btn_row.addWidget(self.cancel_btn)
         mid_layout.addLayout(btn_row)
+
+        self.mesh_review_section = CollapsibleSection(
+            "Mesh review — retexture a variant, then approve it",
+            expanded=False,
+        )
+        self.mesh_review_check = QCheckBox("Pause after image-to-3D so you can retexture first")
+        self.mesh_review_check.setToolTip(
+            "The next finished image-to-3D stops here. If a mesh already exists, "
+            "retexture and approve a variant now."
+        )
+        self.mesh_review_check.toggled.connect(self._on_mesh_review_toggled)
+        self.mesh_review_section.add_widget(self.mesh_review_check)
+        self.mesh_variant_combo = QComboBox()
+        self.mesh_variant_combo.setPlaceholderText("Finished meshes appear here")
+        self.mesh_variant_combo.currentIndexChanged.connect(self._on_mesh_variant_changed)
+        self.mesh_review_section.add_widget(self.mesh_variant_combo)
+        self.retexture_prompt = QPlainTextEdit()
+        self.retexture_prompt.setPlaceholderText(
+            "New texture, e.g. weathered bronze armor (max 800 characters)"
+        )
+        self.retexture_prompt.setFixedHeight(texture_line_height * 3 + 12)
+        self.mesh_review_section.add_widget(self.retexture_prompt)
+        style_row = QHBoxLayout()
+        self.retexture_style_image = QLineEdit()
+        self.retexture_style_image.setPlaceholderText(
+            "Optional style image — used instead of the prompt"
+        )
+        style_browse = QPushButton("Browse…")
+        style_browse.clicked.connect(self._browse_retexture_style)
+        style_row.addWidget(self.retexture_style_image, stretch=1)
+        style_row.addWidget(style_browse)
+        self.mesh_review_section.add_layout(style_row)
+        retex_row = QHBoxLayout()
+        self.retexture_btn = QPushButton("Retexture")
+        self.retexture_btn.setEnabled(False)
+        self.retexture_btn.setToolTip("One Meshy Retexture task, about 10 credits (15 at 8K)")
+        self.retexture_btn.clicked.connect(self._retexture_mesh)
+        self.approve_mesh_btn = QPushButton("Approve selected && continue")
+        self.approve_mesh_btn.setEnabled(False)
+        self.approve_mesh_btn.setToolTip(
+            "Use this mesh for remesh, rig, and export, then continue the pipeline"
+        )
+        self.approve_mesh_btn.clicked.connect(self._approve_mesh)
+        retex_row.addWidget(self.retexture_btn)
+        retex_row.addWidget(self.approve_mesh_btn)
+        retex_row.addStretch(1)
+        self.mesh_review_section.add_layout(retex_row)
+        mid_layout.addWidget(self.mesh_review_section)
 
         placeholder_help = ", ".join(f"{{{name}}}" for name in UNITY_IMPORT_TEMPLATE_PLACEHOLDERS)
         prompt_section = CollapsibleSection(
@@ -750,6 +799,7 @@ class WorkflowWindow(QMainWindow):
             self._update_import_enabled()
             self._update_download_enabled()
             self._update_delete_character_enabled()
+            self._refresh_mesh_review(None)
             return
         index = 0
         if target_id is not None:
@@ -832,6 +882,7 @@ class WorkflowWindow(QMainWindow):
             self._last_drop_path = None
             self.preview_panel.clear_tpose_preview()
         self._refresh_mesh_preview(pipeline_id)
+        self._refresh_mesh_review(pipe)
         self._update_output_folder_display()
         self._update_import_enabled()
         self._update_download_enabled()
@@ -913,6 +964,147 @@ class WorkflowWindow(QMainWindow):
             self.download_meshy_btn.setEnabled(False)
             return
         self.download_meshy_btn.setEnabled(bool(self._meshy_rig_task_id(self._selected_pipeline)))
+
+    def _refresh_mesh_review(self, pipe) -> None:
+        from asset_assembly_automator.core.state_machine import mesh_review_enabled
+        from asset_assembly_automator.stages.s05c_mesh_review import mesh_variants
+
+        self.mesh_review_check.blockSignals(True)
+        self.mesh_review_check.setEnabled(pipe is not None)
+        self.mesh_review_check.setChecked(bool(pipe and mesh_review_enabled(pipe)))
+        self.mesh_review_check.blockSignals(False)
+        self.mesh_variant_combo.blockSignals(True)
+        self.mesh_variant_combo.clear()
+        if pipe is None:
+            self.mesh_variant_combo.blockSignals(False)
+            self.retexture_btn.setEnabled(False)
+            self.approve_mesh_btn.setEnabled(False)
+            return
+        if pipe.current_stage == StageId.MESH_REVIEW.value:
+            self.mesh_review_section.set_expanded(True)
+        approved = (pipe.metadata.get("mesh_source") or {}).get("task_id")
+        retex_n = 0
+        for job in mesh_variants(self.db, pipe.id):
+            meta = job.get("metadata") or {}
+            if job["task_type"] == "image-to-3d":
+                label = "Original (image-to-3D)"
+                preview = self._original_mesh_preview(pipe)
+            else:
+                retex_n += 1
+                desc = meta.get("prompt") or Path(meta.get("style_image_path") or "").name
+                label = f"Retexture #{retex_n}: {str(desc)[:48]}"
+                preview = meta.get("thumbnail_path") or ""
+            if job["task_id"] == approved:
+                label = f"✔ {label}"
+            self.mesh_variant_combo.addItem(label, {"task_id": job["task_id"], "preview": preview})
+        self.mesh_variant_combo.blockSignals(False)
+        has_mesh = self.mesh_variant_combo.count() > 0
+        self.retexture_btn.setEnabled(has_mesh)
+        self.approve_mesh_btn.setEnabled(has_mesh)
+        if has_mesh:
+            self.mesh_variant_combo.setCurrentIndex(self.mesh_variant_combo.count() - 1)
+            self._on_mesh_variant_changed()
+
+    def _original_mesh_preview(self, pipe) -> str:
+        from asset_assembly_automator.core.output_paths import preview_png_path
+
+        try:
+            original = preview_png_path(
+                get_output_dirs(self.db, pipe.id), pipeline_character_slug(pipe)
+            )
+        except ValueError:
+            original = None
+        if original and original.is_file():
+            return str(original)
+        return str(pipe.metadata.get("mesh_preview_path") or "")
+
+    def _on_mesh_review_toggled(self, enabled: bool) -> None:
+        if self._selected_pipeline is not None:
+            self.controller.set_mesh_review_enabled(self._selected_pipeline, enabled)
+
+    def _on_mesh_variant_changed(self) -> None:
+        data = self.mesh_variant_combo.currentData() or {}
+        preview = str(data.get("preview") or "")
+        if preview and Path(preview).is_file():
+            self.preview_panel.show_mesh_preview(preview)
+
+    def _browse_retexture_style(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Style image", "", "Images (*.png *.jpg *.jpeg *.webp)"
+        )
+        if path:
+            self.retexture_style_image.setText(path)
+
+    def _retexture_mesh(self) -> None:
+        from asset_assembly_automator.clients.meshy_client import RETEXTURE_PROMPT_MAX_CHARS
+
+        if not self._selected_pipeline:
+            return
+        prompt = self.retexture_prompt.toPlainText().strip()
+        image = self.retexture_style_image.text().strip()
+        if not prompt and not image:
+            QMessageBox.warning(
+                self, "Retexture", "Enter a texture prompt or choose a style image."
+            )
+            return
+        if len(prompt) > RETEXTURE_PROMPT_MAX_CHARS:
+            QMessageBox.warning(
+                self,
+                "Retexture",
+                f"Prompt is {len(prompt)} characters; Meshy allows {RETEXTURE_PROMPT_MAX_CHARS}.",
+            )
+            return
+        reply = QMessageBox.question(
+            self,
+            "Retexture",
+            (
+                f"Create a new texture for “{self.character_name.text().strip()}”?\n\n"
+                "About 10 Meshy credits (15 at 8K). A failed task is refunded. "
+                "The pipeline stays here until you approve a variant."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.controller.schedule_retexture(
+            self._selected_pipeline,
+            self.loop,
+            prompt=prompt,
+            style_image_path=image or None,
+        )
+        self._set_run_buttons_enabled(False)
+
+    def _approve_mesh(self) -> None:
+        if not self._selected_pipeline:
+            return
+        data = self.mesh_variant_combo.currentData() or {}
+        task_id = data.get("task_id")
+        if not task_id:
+            return
+        label = self.mesh_variant_combo.currentText()
+        reply = QMessageBox.question(
+            self,
+            "Approve mesh",
+            (
+                f"Use “{label}” for remesh, rig, and export, then continue?\n\n"
+                "Approving from a later stage re-runs those stages for this mesh."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.controller.schedule_approve_mesh(
+            self._selected_pipeline, self.loop, task_id=str(task_id)
+        )
+        self._set_run_buttons_enabled(False)
+
+    def _set_run_buttons_enabled(self, enabled: bool) -> None:
+        self.run_meshy_btn.setEnabled(enabled)
+        self.retexture_btn.setEnabled(enabled and self.mesh_variant_combo.count() > 0)
+        self.approve_mesh_btn.setEnabled(enabled and self.mesh_variant_combo.count() > 0)
+        if not enabled:
+            self.download_meshy_btn.setEnabled(False)
+            self.import_btn.setEnabled(False)
 
     def _browse_unity_path(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select Unity project folder")
@@ -1407,9 +1599,7 @@ class WorkflowWindow(QMainWindow):
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
         self.controller.schedule_meshy_workflow(pipeline_id, self.loop)
-        self.run_meshy_btn.setEnabled(False)
-        self.download_meshy_btn.setEnabled(False)
-        self.import_btn.setEnabled(False)
+        self._set_run_buttons_enabled(False)
 
     def _download_from_meshy(self) -> None:
         pipeline_id = self._ensure_pipeline()
@@ -1445,9 +1635,7 @@ class WorkflowWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
         self.controller.schedule_meshy_redownload(pipeline_id, self.loop)
-        self.run_meshy_btn.setEnabled(False)
-        self.download_meshy_btn.setEnabled(False)
-        self.import_btn.setEnabled(False)
+        self._set_run_buttons_enabled(False)
 
     def _import_unity(self) -> None:
         if not self._selected_pipeline:
@@ -1635,6 +1823,7 @@ class WorkflowWindow(QMainWindow):
             self._update_download_enabled()
             self._update_import_enabled()
             self._refresh_mesh_preview(pipeline_id)
+            self._refresh_mesh_review(pipe)
             return
         level = "completed" if success else "failed"
         self.status_label.setText(f"{level}: {message}")
@@ -1649,6 +1838,12 @@ class WorkflowWindow(QMainWindow):
         self.run_meshy_btn.setEnabled(True)
         self._update_download_enabled()
         self._update_import_enabled()
+        pipe = (
+            self.controller.get_pipeline(self._selected_pipeline)
+            if self._selected_pipeline
+            else None
+        )
+        self._refresh_mesh_review(pipe)
 
     def _on_pipeline_updated(self, pipeline_id: int) -> None:
         if pipeline_id == self._selected_pipeline:

@@ -1,8 +1,8 @@
 # Asset Assembly Automator (AAA)
 
-**Version 0.2.0** — Python + PyQt6 orchestrator for Character / Vehicle / Aircraft pipelines (approved concept → optional Magnific uprez → Meshy 7 → FBX.zip → Unity).
+**Version 0.4.0** — Python + PyQt6 orchestrator for Character / Vehicle / Aircraft pipelines (approved concept → optional Magnific uprez → Meshy 7.1 → optional retexture → FBX.zip → Unity).
 
-Automates concept intake from **Midjourney, Magnific, or optional Higgsfield** (any approved PNG is fine), optional **Magnific auto-uprez**, Meshy **Quality (meshy-7 8K)** or **Game-ready (smart-topology)** presets, optional remesh (default off), rig/animate (**characters only**), QC, zip export, and **deterministic Unity import** via `com.assetassembly.import` UPM package. **AnkleBreaker MCP / agent CLI runs only when C# validation fails.** Full capability catalog: [`docs/ENHANCEMENTS.md`](docs/ENHANCEMENTS.md).
+Automates concept intake from **Midjourney, Magnific, or optional Higgsfield** (any approved PNG is fine), optional **Magnific auto-uprez**, Meshy **Quality (meshy-7.1, 8K)** or **Game-ready (meshy-t2.5)** presets, optional remesh (default off), optional **mesh review / retexture**, rig/animate (**characters only**), QC, zip export, and **deterministic Unity import** via `com.assetassembly.import` UPM package. **AnkleBreaker MCP / agent CLI runs only when C# validation fails.** Full capability catalog: [`docs/ENHANCEMENTS.md`](docs/ENHANCEMENTS.md).
 
 ### Documentation map
 
@@ -10,7 +10,7 @@ Automates concept intake from **Midjourney, Magnific, or optional Higgsfield** (
 |-----|------|
 | [README.md](README.md) | Developer overview — architecture diagrams, both GUIs, data model |
 | [AAA-WORKFLOW.md](AAA-WORKFLOW.md) | Meshy Workflow app + Unity import chain |
-| [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md) | v0.2 locked decisions, UPM ownership, capability catalog |
+| [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md) | Locked decisions, UPM ownership, capability catalog |
 | [docs/DB-TIMING.md](docs/DB-TIMING.md) | Stage timing and `pipeline_timing_stats` |
 | **ASSET-ASSEMBLY-AUTOMATOR.md** (this file) | Product spec — stages, CLI, config, providers |
 | [AGENTS.md](AGENTS.md) | AI agent guardrails |

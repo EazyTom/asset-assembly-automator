@@ -44,7 +44,7 @@ def test_meshy_game_ready_payload():
         image_url="data:image/png;base64,abc",
     )
     assert payload["model_type"] == "smart-topology"
-    assert payload["ai_model"] == "meshy-t2"
+    assert payload["ai_model"] == "meshy-t2.5"
     assert payload["target_polycount"] == 4000
     assert "topology" not in payload
 

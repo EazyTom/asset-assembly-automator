@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System.IO;
+using AssetAssembly.Import.Runtime;
 using UnityEditor;
 using UnityEngine;
 
@@ -7,28 +8,30 @@ namespace AssetAssembly.Import.Editor
 {
     public static class VehicleManifestImportUtility
     {
-        public static bool ImportFromSlug(string slug)
+        public static bool ImportFromSlug(string slug, float targetSizeMeters = 4.2f)
         {
             var root = $"Assets/Vehicles/{slug}";
             var meshPath = FindMeshFbx(root);
             if (string.IsNullOrEmpty(meshPath))
             {
-                Debug.LogError("[AAA Vehicle] FBX missing under Source/");
+                Debug.LogError($"[{AaaLabels.Vehicle}] FBX missing under Source/");
                 return false;
             }
 
-            MeshyHdImportUtility.PrepareFbx(meshPath);
+            MeshyHdImportUtility.PrepareFbx(meshPath, targetSizeMeters);
             var prefabPath = $"{root}/Prefabs/PF_{slug}.prefab";
             EnsureFolder(prefabPath);
             var model = AssetDatabase.LoadAssetAtPath<GameObject>(meshPath);
             if (model == null)
+            {
                 return false;
+            }
+
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(model);
             instance.name = $"PF_{slug}";
-            if (instance.GetComponent<AssetAssembly.Import.Runtime.DriveController>() == null)
-                instance.AddComponent<AssetAssembly.Import.Runtime.DriveController>();
-            PrefabUtility.SaveAsPrefabAsset(instance, prefabPath, out bool ok);
-            Object.DestroyImmediate(instance);
+            GameObject rig = DriveRigBuilder.Build(instance, targetSizeMeters);
+            PrefabUtility.SaveAsPrefabAsset(rig, prefabPath, out bool ok);
+            Object.DestroyImmediate(rig);
             return ok;
         }
 
@@ -36,9 +39,15 @@ namespace AssetAssembly.Import.Editor
         {
             var source = Path.Combine(Application.dataPath, "..", root, "Source");
             if (!Directory.Exists(source))
+            {
                 return null;
+            }
+
             foreach (var file in Directory.GetFiles(source, "*.fbx"))
+            {
                 return $"{root}/Source/{Path.GetFileName(file)}";
+            }
+
             return null;
         }
 
@@ -46,7 +55,9 @@ namespace AssetAssembly.Import.Editor
         {
             var dir = Path.GetDirectoryName(Path.Combine(Application.dataPath, "..", assetPath));
             if (!string.IsNullOrEmpty(dir))
+            {
                 Directory.CreateDirectory(dir);
+            }
         }
     }
 }

@@ -27,7 +27,14 @@ def test_default_meshy_i2d_image_limits():
     assert meshy.i2d_max_image_px == 4096
     assert meshy.i2d_max_image_mb == 18
     assert meshy.use_hires_texture_image is False
-    assert meshy.ai_model == "meshy-7"
+    assert meshy.api_version == "v1"
+    assert meshy.texture_model == "meshy-7"
+    assert meshy.ai_model == "meshy-7.1"
+    assert meshy.geometry_resolution == "standard"
+    assert meshy.smart_topology_model == "meshy-t2.5"
+    assert meshy.retexture_ai_model == "meshy-7"
+    assert meshy.poll_timeout_seconds == 3600
+    assert meshy.mesh_review_gate is False
 
 
 def test_default_unity_mcp_bridge():

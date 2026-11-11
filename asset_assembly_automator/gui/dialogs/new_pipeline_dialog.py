@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
     QSlider,
 )
 
+from asset_assembly_automator.clients.meshy_client import SMART_TOPOLOGY_POLYCOUNT_MAX
+from asset_assembly_automator.core.asset_kind import default_import_profile, display_label
 from asset_assembly_automator.core.config import get_settings
 from asset_assembly_automator.core.db.models import Database
 
@@ -36,17 +38,36 @@ class NewPipelineDialog(QDialog):
 
         self.asset_name = QLineEdit()
         self.asset_kind = QComboBox()
-        self.asset_kind.addItem("Character", "character")
-        self.asset_kind.addItem("Vehicle", "vehicle")
-        self.asset_kind.addItem("Aircraft", "aircraft")
+        self.asset_kind.addItem(display_label("character"), "character")
+        self.asset_kind.addItem(display_label("vehicle"), "vehicle")
+        self.asset_kind.addItem(display_label("aircraft"), "aircraft")
+
+        self.import_profile = QComboBox()
+        self.import_profile.addItem("Character humanoid rig + patrol", "character_humanoid")
+        self.import_profile.addItem("Aircraft flight rig + cockpit HUD", "aircraft_flight_cockpit")
+        self.import_profile.addItem("Vehicle drive rig + dashboard", "vehicle_drive_dashboard")
+        self.import_profile.addItem("Static prop (mesh only)", "static_prop")
+        self.asset_kind.currentIndexChanged.connect(self._sync_import_profile_default)
 
         self.meshy_preset = QComboBox()
-        self.meshy_preset.addItem("Quality (meshy-7, 8K)", "quality")
-        self.meshy_preset.addItem("Game-ready (smart-topology)", "game_ready")
+        self.meshy_preset.addItem(f"Quality ({settings.meshy.ai_model}, 8K)", "quality")
+        self.meshy_preset.addItem(
+            f"Game-ready (smart-topology {settings.meshy.smart_topology_model})", "game_ready"
+        )
 
         self.texture_resolution = QComboBox()
         self.texture_resolution.addItems(["2k", "4k", "8k"])
         self.texture_resolution.setCurrentText(settings.meshy.default_texture_resolution)
+
+        self.geometry_resolution = QComboBox()
+        self.geometry_resolution.addItem("Standard", "standard")
+        self.geometry_resolution.addItem("2K detail (+5 credits)", "2k")
+        self.geometry_resolution.addItem("4K detail (+5 credits, meshy-7.1 only)", "4k")
+        geo_idx = self.geometry_resolution.findData(settings.meshy.geometry_resolution)
+        self.geometry_resolution.setCurrentIndex(max(geo_idx, 0))
+
+        self.mesh_review = QCheckBox("Pause for mesh review / retexture after image-to-3D")
+        self.mesh_review.setChecked(settings.meshy.mesh_review_gate)
 
         self.image_enhancement = QCheckBox("Image enhancement")
         self.image_enhancement.setChecked(settings.meshy.image_enhancement)
@@ -58,7 +79,8 @@ class NewPipelineDialog(QDialog):
         self.magnific_enabled.setChecked(settings.magnific.default_enabled)
 
         self.poly_slider = QSlider(Qt.Orientation.Horizontal)
-        self.poly_slider.setRange(100, 15000)
+        poly_max = SMART_TOPOLOGY_POLYCOUNT_MAX.get(settings.meshy.smart_topology_model, 15000)
+        self.poly_slider.setRange(100, poly_max)
         self.poly_slider.setValue(4000)
         self.poly_label = QLabel("4000")
         self.poly_slider.valueChanged.connect(lambda v: self.poly_label.setText(str(v)))
@@ -77,10 +99,13 @@ class NewPipelineDialog(QDialog):
             form.addRow("Output folder", self.output_root)
 
         form.addRow("Asset type", self.asset_kind)
+        form.addRow("Import profile", self.import_profile)
         form.addRow("Asset name", self.asset_name)
         form.addRow("Meshy preset", self.meshy_preset)
         form.addRow("Texture resolution", self.texture_resolution)
+        form.addRow("Geometry detail", self.geometry_resolution)
         form.addRow(self.image_enhancement)
+        form.addRow(self.mesh_review)
         form.addRow(self.remesh_enabled)
         form.addRow(self.magnific_enabled)
         form.addRow("Game-ready polycount", poly_row)
@@ -100,8 +125,16 @@ class NewPipelineDialog(QDialog):
     def _sync_preset_ui(self) -> None:
         game_ready = self.meshy_preset.currentData() == "game_ready"
         self.texture_resolution.setEnabled(not game_ready)
+        self.geometry_resolution.setEnabled(not game_ready)
         self.remesh_enabled.setEnabled(not game_ready)
         self.poly_slider.setEnabled(game_ready)
+
+    def _sync_import_profile_default(self) -> None:
+        kind = str(self.asset_kind.currentData())
+        profile = default_import_profile(kind)
+        idx = self.import_profile.findData(profile)
+        if idx >= 0:
+            self.import_profile.setCurrentIndex(idx)
 
     def accept(self) -> None:
         asset_name = self.asset_name.text().strip()
@@ -121,6 +154,8 @@ class NewPipelineDialog(QDialog):
         metadata = {
             "meshy_preset": self.meshy_preset.currentData(),
             "texture_resolution": self.texture_resolution.currentText(),
+            "geometry_resolution": self.geometry_resolution.currentData(),
+            "mesh_review_enabled": self.mesh_review.isChecked(),
             "image_enhancement": self.image_enhancement.isChecked(),
             "remesh_enabled": self.remesh_enabled.isChecked(),
             "magnific_enabled": self.magnific_enabled.isChecked(),
@@ -131,6 +166,7 @@ class NewPipelineDialog(QDialog):
             asset_name,
             poly_budget=self.poly_budget.currentText(),
             asset_kind=str(self.asset_kind.currentData()),
+            import_profile=str(self.import_profile.currentData()),
             metadata=metadata,
         )
         super().accept()

@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from asset_assembly_automator.core.asset_kind import (
+    default_import_profile,
+    default_target_size_meters,
+    normalize_asset_kind,
+)
 from asset_assembly_automator.core.config import get_settings
 
 _local = threading.local()
@@ -41,6 +44,7 @@ class Pipeline:
     metadata: dict[str, Any]
     created_at: str
     updated_at: str
+    import_profile: str = ""
 
 
 @dataclass
@@ -80,6 +84,7 @@ def close_thread_connection() -> None:
     """Close the thread-local SQLite handle (required before deleting aaa.db on disk)."""
     conn = getattr(_local, "conn", None)
     if conn is not None:
+        conn.execute("PRAGMA optimize")
         conn.close()
     _local.conn = None
     _local.conn_path = None
@@ -103,11 +108,29 @@ def reset_local_database(db_path: Path | None = None) -> Path:
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
     """Apply additive schema migrations for existing databases."""
+    conn.execute("PRAGMA synchronous=NORMAL")
     cols = {row[1] for row in conn.execute("PRAGMA table_info(pipelines)").fetchall()}
     if "asset_kind" not in cols:
         conn.execute(
             "ALTER TABLE pipelines ADD COLUMN asset_kind TEXT NOT NULL DEFAULT 'character'"
         )
+    if "import_profile" not in cols:
+        conn.execute("ALTER TABLE pipelines ADD COLUMN import_profile TEXT NOT NULL DEFAULT ''")
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pipelines_updated ON pipelines(updated_at DESC)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pipelines_project_kind "
+        "ON pipelines(project_id, asset_kind, updated_at DESC)"
+    )
+    conn.execute("DROP INDEX IF EXISTS idx_external_jobs_active")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_external_jobs_active
+        ON external_jobs(pipeline_id, task_type)
+        WHERE status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELED')
+          AND task_type != 'animation'
+        """
+    )
 
     stage_cols = {row[1] for row in conn.execute("PRAGMA table_info(pipeline_stages)").fetchall()}
     if "duration_ms" not in stage_cols:
@@ -139,7 +162,6 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         "ON pipeline_stages(pipeline_id, stage_name, id DESC)"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_log_entries_stage ON log_entries(stage_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(pipeline_id, asset_type)")
 
 
 def init_db(db_path: Path | None = None) -> None:
@@ -150,25 +172,16 @@ def init_db(db_path: Path | None = None) -> None:
     conn.commit()
 
 
-@contextmanager
-def transaction(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
-    conn = get_connection(db_path)
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-
-
 def _row_to_pipeline(row: sqlite3.Row) -> Pipeline:
     keys = row.keys()
     asset_kind = row["asset_kind"] if "asset_kind" in keys else "character"
+    import_profile = row["import_profile"] if "import_profile" in keys else ""
     return Pipeline(
         id=row["id"],
         project_id=row["project_id"],
         asset_name=row["asset_name"],
         asset_kind=asset_kind or "character",
+        import_profile=import_profile or "",
         current_stage=row["current_stage"],
         status=row["status"],
         selected_concept_provider=row["selected_concept_provider"],
@@ -217,8 +230,11 @@ class Database:
         poly_budget: str = "hero",
         multi_view: bool = False,
         asset_kind: str = "character",
+        import_profile: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> int:
+        kind = normalize_asset_kind(asset_kind, strict=True)
+        profile = import_profile.strip() or default_import_profile(kind)
         meta = {
             "meshy_preset": "quality",
             "texture_resolution": "8k",
@@ -226,20 +242,22 @@ class Database:
             "remesh_enabled": False,
             "magnific_enabled": True,
             "smart_topology_polycount": 4000,
+            "target_size_meters": default_target_size_meters(kind),
             **(metadata or {}),
         }
         cur = self.conn.execute(
             """
             INSERT INTO pipelines (
-                project_id, asset_name, asset_kind, poly_budget, multi_view,
+                project_id, asset_name, asset_kind, import_profile, poly_budget, multi_view,
                 current_stage, metadata_json
             )
-            VALUES (?, ?, ?, ?, ?, 'draft', ?)
+            VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)
             """,
             (
                 project_id,
                 asset_name,
-                asset_kind,
+                kind,
+                profile,
                 poly_budget,
                 int(multi_view),
                 json.dumps(meta),
@@ -312,11 +330,14 @@ class Database:
         *,
         status: str | None = None,
         metadata: dict[str, Any] | None = None,
+        remove_metadata_keys: tuple[str, ...] = (),
     ) -> None:
         pipe = self.get_pipeline(pipeline_id)
         if not pipe:
             raise ValueError(f"Pipeline {pipeline_id} not found")
         meta = {**pipe.metadata, **(metadata or {})}
+        for key in remove_metadata_keys:
+            meta.pop(key, None)
         now = datetime.now(UTC).isoformat()
         self.conn.execute(
             """
@@ -328,6 +349,24 @@ class Database:
             (stage, status, json.dumps(meta), now, pipeline_id),
         )
         self.conn.commit()
+
+    def update_pipeline_metadata(
+        self,
+        pipeline_id: int,
+        metadata: dict[str, Any] | None = None,
+        *,
+        remove_keys: tuple[str, ...] = (),
+    ) -> None:
+        """Merge/remove metadata keys without moving the pipeline's current stage."""
+        pipe = self.get_pipeline(pipeline_id)
+        if not pipe:
+            raise ValueError(f"Pipeline {pipeline_id} not found")
+        self.update_pipeline_stage(
+            pipeline_id,
+            pipe.current_stage,
+            metadata=metadata,
+            remove_metadata_keys=remove_keys,
+        )
 
     def record_stage(
         self,
@@ -607,6 +646,11 @@ class Database:
         expires_at: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> int:
+        # Animation clips are separate tasks. Other types keep a single active job.
+        if task_type != "animation":
+            existing = self.get_external_job(pipeline_id, task_type, active_only=True)
+            if existing:
+                self.update_external_job(existing["id"], status="CANCELED")
         cur = self.conn.execute(
             """
             INSERT INTO external_jobs
@@ -642,6 +686,26 @@ class Database:
         row = self.conn.execute(query, params).fetchone()
         return dict(row) if row else None
 
+    def list_external_jobs(
+        self, pipeline_id: int, task_types: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """All jobs for a pipeline (oldest first) with ``metadata`` decoded."""
+        query = "SELECT * FROM external_jobs WHERE pipeline_id = ?"
+        params: list[Any] = [pipeline_id]
+        if task_types:
+            query += f" AND task_type IN ({', '.join('?' for _ in task_types)})"
+            params.extend(task_types)
+        query += " ORDER BY id ASC"
+        jobs: list[dict[str, Any]] = []
+        for row in self.conn.execute(query, params).fetchall():
+            job = dict(row)
+            try:
+                job["metadata"] = json.loads(job.get("metadata_json") or "{}")
+            except json.JSONDecodeError:
+                job["metadata"] = {}
+            jobs.append(job)
+        return jobs
+
     def update_external_job(
         self,
         job_id: int,
@@ -649,6 +713,7 @@ class Database:
         status: str | None = None,
         face_count: int | None = None,
         credits_used: float | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         fields: list[str] = []
         values: list[Any] = []
@@ -661,6 +726,17 @@ class Database:
         if credits_used is not None:
             fields.append("credits_used = ?")
             values.append(credits_used)
+        if metadata:
+            row = self.conn.execute(
+                "SELECT metadata_json FROM external_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            try:
+                merged = json.loads(row["metadata_json"] or "{}") if row else {}
+            except json.JSONDecodeError:
+                merged = {}
+            merged.update(metadata)
+            fields.append("metadata_json = ?")
+            values.append(json.dumps(merged))
         if not fields:
             return
         values.append(job_id)

@@ -10,7 +10,9 @@ def find_resumable_pipelines(db: Database | None = None) -> list[dict]:
         """
         SELECT p.* FROM pipelines p
         WHERE p.status = 'active'
-          AND p.current_stage NOT IN ('complete', 'draft', 'prompt_build', 'concept_review')
+          AND p.current_stage NOT IN (
+              'complete', 'draft', 'prompt_build', 'concept_review', 'mesh_review'
+          )
         ORDER BY p.updated_at DESC
         """
     ).fetchall()
@@ -47,6 +49,8 @@ STAGE_MODULE_MAP = {
     StageId.IMAGE_PREP: "asset_assembly_automator.stages.s04_image_prep",
     StageId.TURNAROUND: "asset_assembly_automator.stages.s04b_turnaround",
     StageId.MESHY_I2D: "asset_assembly_automator.stages.s05_meshy_image_to_3d",
+    StageId.MESHY_RETEXTURE: "asset_assembly_automator.stages.s05b_meshy_retexture",
+    StageId.MESH_REVIEW: "asset_assembly_automator.stages.s05c_mesh_review",
     StageId.MESHY_REMESH: "asset_assembly_automator.stages.s06_meshy_remesh",
     StageId.MESHY_RIG: "asset_assembly_automator.stages.s07_meshy_rig",
     StageId.MESHY_ANIMATE: "asset_assembly_automator.stages.s08_meshy_animate",

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from asset_assembly_automator.core.asset_kind import normalize_asset_kind
+
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
-    from asset_assembly_automator.core.db.models import Database, Pipeline
+    from asset_assembly_automator.core.db.models import Pipeline
 
 
 class StageId(StrEnum):
@@ -17,6 +22,10 @@ class StageId(StrEnum):
     IMAGE_PREP = "image_prep"
     TURNAROUND = "turnaround"
     MESHY_I2D = "meshy_i2d"
+    # Optional gate: pick the original i2d mesh or a retextured variant before remesh/rig.
+    MESH_REVIEW = "mesh_review"
+    # On-demand action at mesh_review; not on the auto path.
+    MESHY_RETEXTURE = "meshy_retexture"
     MESHY_REMESH = "meshy_remesh"
     MESHY_RIG = "meshy_rig"
     MESHY_ANIMATE = "meshy_animate"
@@ -24,12 +33,12 @@ class StageId(StrEnum):
     MESHY_QC = "meshy_qc"
     PACKAGE_EXPORT = "package_export"
     COMPLETE = "complete"
-    # Phase 2 stubs
+    UNITY_IMPORT = "unity_import"
+    # Phase 2 stubs (world pipeline only)
     WORLD_CONCEPT = "world_concept"
     WORLD_I2D = "world_i2d"
     WORLD_REMESH = "world_remesh"
     WORLD_EXPORT = "world_export"
-    UNITY_IMPORT = "unity_import"
 
 
 CHARACTER_STAGE_ORDER: list[StageId] = [
@@ -40,6 +49,7 @@ CHARACTER_STAGE_ORDER: list[StageId] = [
     StageId.IMAGE_PREP,
     StageId.TURNAROUND,
     StageId.MESHY_I2D,
+    StageId.MESH_REVIEW,
     StageId.MESHY_REMESH,
     StageId.MESHY_RIG,
     StageId.MESHY_ANIMATE,
@@ -56,6 +66,7 @@ VEHICLE_STAGE_ORDER: list[StageId] = [
     StageId.MAGNIFIC_UPREZ,
     StageId.IMAGE_PREP,
     StageId.MESHY_I2D,
+    StageId.MESH_REVIEW,
     StageId.MESHY_REMESH,
     StageId.MESHY_DOWNLOAD,
     StageId.MESHY_QC,
@@ -70,6 +81,7 @@ AIRCRAFT_STAGE_ORDER: list[StageId] = [
     StageId.MAGNIFIC_UPREZ,
     StageId.IMAGE_PREP,
     StageId.MESHY_I2D,
+    StageId.MESH_REVIEW,
     StageId.MESHY_REMESH,
     StageId.MESHY_DOWNLOAD,
     StageId.MESHY_QC,
@@ -81,6 +93,7 @@ MESHY_WORKFLOW_STAGE_ORDER: list[StageId] = [
     StageId.MAGNIFIC_UPREZ,
     StageId.IMAGE_PREP,
     StageId.MESHY_I2D,
+    StageId.MESH_REVIEW,
     StageId.MESHY_REMESH,
     StageId.MESHY_RIG,
     StageId.MESHY_ANIMATE,
@@ -92,6 +105,7 @@ MESHY_WORKFLOW_STAGE_ORDER: list[StageId] = [
 
 MANUAL_GATES = {
     StageId.CONCEPT_REVIEW,
+    StageId.MESH_REVIEW,
 }
 
 AUTO_STAGES = {
@@ -112,16 +126,24 @@ AUTO_STAGES = {
 
 def asset_kind_for_pipeline(pipe: Pipeline) -> str:
     kind = getattr(pipe, "asset_kind", None) or pipe.metadata.get("asset_kind") or "character"
-    if kind not in ("character", "vehicle", "aircraft"):
-        return "character"
-    return kind
+    normalized = normalize_asset_kind(kind, strict=False)
+    if normalized != kind:
+        logger.warning(
+            "Coerced unknown asset_kind %r to %r for pipeline %s", kind, normalized, pipe.id
+        )
+    return normalized
 
 
 def stage_order_for_kind(asset_kind: str) -> list[StageId]:
-    if asset_kind == "vehicle":
+    kind = normalize_asset_kind(asset_kind, strict=False)
+    if kind == "vehicle":
         return list(VEHICLE_STAGE_ORDER)
-    if asset_kind == "aircraft":
+    if kind == "aircraft":
         return list(AIRCRAFT_STAGE_ORDER)
+    if kind != "character":
+        logger.warning(
+            "Unknown asset_kind %r in stage_order_for_kind; using character order", asset_kind
+        )
     return list(CHARACTER_STAGE_ORDER)
 
 
@@ -132,11 +154,25 @@ def runnable_stage(current: StageId) -> StageId:
     return current
 
 
-def _effective_order(*, asset_kind: str = "character", multi_view: bool = False) -> list[StageId]:
+def _effective_order(
+    *,
+    asset_kind: str = "character",
+    multi_view: bool = False,
+    mesh_review: bool = False,
+) -> list[StageId]:
     order = stage_order_for_kind(asset_kind)
     if not multi_view and StageId.TURNAROUND in order:
         order = [s for s in order if s != StageId.TURNAROUND]
+    if not mesh_review:
+        order = [s for s in order if s != StageId.MESH_REVIEW]
     return order
+
+
+def mesh_review_enabled(pipe: Pipeline) -> bool:
+    from asset_assembly_automator.core.config import get_settings
+
+    default = get_settings().meshy.mesh_review_gate
+    return bool(pipe.metadata.get("mesh_review_enabled", default))
 
 
 def next_stage(
@@ -144,8 +180,9 @@ def next_stage(
     *,
     multi_view: bool = False,
     asset_kind: str = "character",
+    mesh_review: bool = False,
 ) -> StageId | None:
-    order = _effective_order(asset_kind=asset_kind, multi_view=multi_view)
+    order = _effective_order(asset_kind=asset_kind, multi_view=multi_view, mesh_review=mesh_review)
     try:
         idx = order.index(current)
     except ValueError:
@@ -170,33 +207,3 @@ def stage_progress(stage: StageId, *, asset_kind: str = "character") -> int:
         return 0
     total = len(order) - 1
     return int((idx / total) * 100) if total else 0
-
-
-def can_transition(
-    current: StageId,
-    target: StageId,
-    *,
-    asset_kind: str = "character",
-) -> bool:
-    order = stage_order_for_kind(asset_kind)
-    try:
-        return order.index(target) >= order.index(current)
-    except ValueError:
-        return False
-
-
-def advance_pipeline(
-    db: Database,
-    pipeline_id: int,
-    *,
-    multi_view: bool = False,
-) -> StageId | None:
-    pipe = db.get_pipeline(pipeline_id)
-    if not pipe:
-        return None
-    kind = asset_kind_for_pipeline(pipe)
-    current = StageId(pipe.current_stage)
-    nxt = next_stage(current, multi_view=multi_view or pipe.multi_view, asset_kind=kind)
-    if nxt:
-        db.update_pipeline_stage(pipeline_id, nxt.value)
-    return nxt

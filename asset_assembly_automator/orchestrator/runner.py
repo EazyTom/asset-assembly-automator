@@ -44,9 +44,19 @@ class PipelineRunner:
         if not module_path:
             return StageResult(success=False, stage=stage.value, error=f"No module for {stage}")
         module = importlib.import_module(module_path)
-        from asset_assembly_automator.stages._base import bind_db, unbind_db
+        from asset_assembly_automator.stages._base import (
+            bind_cancel_event,
+            bind_db,
+            unbind_cancel_event,
+            unbind_db,
+        )
 
+        ev = self._cancel_events.get(pipeline_id)
+        if ev is None:
+            ev = asyncio.Event()
+            self._cancel_events[pipeline_id] = ev
         token = bind_db(self.db)
+        cancel_token = bind_cancel_event(ev)
         try:
             async with self.semaphore:
                 provider_sem = stage_semaphore(stage)
@@ -87,6 +97,7 @@ class PipelineRunner:
                     **kwargs,
                 )
         finally:
+            unbind_cancel_event(cancel_token)
             unbind_db(token)
 
     def _log_queued(self, pipeline_id: int, stage: StageId) -> None:

@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from asset_assembly_automator.clients.agent_cli import get_agent_cli
+from asset_assembly_automator.core.asset_kind import (
+    default_import_profile,
+    default_target_size_meters,
+)
 from asset_assembly_automator.core.db.models import StageResult
 from asset_assembly_automator.core.output_paths import pipeline_output_slug
 from asset_assembly_automator.core.state_machine import StageId, asset_kind_for_pipeline
@@ -72,6 +76,10 @@ def _build_manifest(
         "pipeline_id": ctx.pipeline_id,
         "asset_name": pipe.asset_name,
         "asset_kind": asset_kind,
+        "import_profile": getattr(pipe, "import_profile", "") or default_import_profile(asset_kind),
+        "target_size_meters": pipe.metadata.get(
+            "target_size_meters", default_target_size_meters(asset_kind)
+        ),
         "unity_project_path": str(unity_root),
         "character_dir": str(asset_dir),
         "unity_import_zip": zip_path,

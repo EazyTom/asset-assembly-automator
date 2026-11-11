@@ -115,7 +115,7 @@ async def test_image_to_3d_payload_includes_texture_flags(tmp_path, monkeypatch)
         return {"task_id": "task-123", "status": "PENDING"}
 
     client = MeshyClient(api_key="test-key")
-    monkeypatch.setattr(client, "_post", fake_post)
+    monkeypatch.setattr(client, "_create", fake_post)
 
     settings = get_settings().meshy.model_dump()
     settings["target_formats"] = settings["i2d_target_formats"]

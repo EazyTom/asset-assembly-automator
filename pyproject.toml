@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asset-assembly-automator"
-version = "0.2.0"
+version = "0.4.0"
 description = "Midjourney/Higgsfield/Magnific → Meshy → FBX.zip character asset pipeline orchestrator"
 readme = "ASSET-ASSEMBLY-AUTOMATOR.md"
 requires-python = ">=3.11"
@@ -16,13 +16,14 @@ dependencies = [
     "pydantic-settings>=2.2",
     "pyyaml>=6.0",
     "structlog>=24.1",
-    "tenacity>=8.2",
     "keyring>=25.0",
     "watchdog>=4.0",
     "Pillow>=10.2",
     "markdown>=3.5",
     "pyqtdarktheme-fork>=2.3",
-    "mcp>=1.28",
+    # Higgsfield client uses the v1 SDK (streamable_http_client, mcp.shared._httpx_utils).
+    # mcp 2.x removes those. Pin until clients/higgsfield_mcp.py is migrated.
+    "mcp>=1.28,<2",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,7 @@ preview = [
     "trimesh>=4.0",
     "pyrender>=0.1.45",
     "PyOpenGL>=3.1",
+    "numpy>=1.26",
 ]
 dev = [
     "pytest>=8.0",

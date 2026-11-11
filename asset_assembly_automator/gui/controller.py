@@ -138,9 +138,7 @@ class PipelineController(QObject):
 
         stage = StageId(pipe.current_stage)
         if stage in MANUAL_GATES:
-            self.runBlocked.emit(
-                "Pipeline is waiting for concept review. Approve a concept on the Concepts tab."
-            )
+            self.runBlocked.emit(self.gate_message(stage))
             return
         if stage == StageId.COMPLETE:
             self.runBlocked.emit("Pipeline is already complete.")
@@ -148,6 +146,73 @@ class PipelineController(QObject):
 
         async def _wrap() -> None:
             await self.run_pipeline(pipeline_id, manual=manual)
+
+        self._track_task(pipeline_id, loop.create_task(_wrap()))
+
+    @staticmethod
+    def gate_message(stage: StageId) -> str:
+        if stage == StageId.MESH_REVIEW:
+            return "Pipeline is waiting for mesh review. Retexture or approve a mesh to continue."
+        if stage == StageId.CONCEPT_REVIEW:
+            return "Pipeline is waiting for concept review. Approve a concept on the Concepts tab."
+        return "Pipeline is waiting at a manual gate."
+
+    def is_busy(self, pipeline_id: int) -> bool:
+        task = self._tasks.get(pipeline_id)
+        return bool(task and not task.done())
+
+    def set_mesh_review_enabled(self, pipeline_id: int, enabled: bool) -> None:
+        self.db.update_pipeline_metadata(pipeline_id, {"mesh_review_enabled": enabled})
+        self.log_event(pipeline_id, "info", f"Mesh review gate {'on' if enabled else 'off'}")
+        self.pipelineUpdated.emit(pipeline_id)
+
+    def schedule_retexture(
+        self,
+        pipeline_id: int,
+        loop: asyncio.AbstractEventLoop,
+        *,
+        prompt: str,
+        style_image_path: str | None = None,
+    ) -> None:
+        if self.is_busy(pipeline_id):
+            self.runBlocked.emit("A run is already in progress for this pipeline.")
+            return
+        self.log_event(
+            pipeline_id,
+            "info",
+            "Retexture requested",
+            prompt_chars=len(prompt),
+            style_image=style_image_path,
+        )
+
+        async def _wrap() -> None:
+            result = await self.runner.run_stage(
+                pipeline_id,
+                StageId.MESHY_RETEXTURE,
+                prompt=prompt,
+                style_image_path=style_image_path,
+            )
+            await self._after_stage(pipeline_id, result)
+
+        self._track_task(pipeline_id, loop.create_task(_wrap()))
+
+    def schedule_approve_mesh(
+        self, pipeline_id: int, loop: asyncio.AbstractEventLoop, *, task_id: str
+    ) -> None:
+        if self.is_busy(pipeline_id):
+            self.runBlocked.emit("A run is already in progress for this pipeline.")
+            return
+
+        async def _wrap() -> None:
+            pipe = self.db.get_pipeline(pipeline_id)
+            if pipe and pipe.current_stage != StageId.MESH_REVIEW.value:
+                self.db.update_pipeline_stage(
+                    pipeline_id, StageId.MESH_REVIEW.value, status="active"
+                )
+            result = await self.runner.run_stage(pipeline_id, StageId.MESH_REVIEW, task_id=task_id)
+            await self._after_stage(pipeline_id, result)
+            if result.success:
+                await self.run_pipeline(pipeline_id)
 
         self._track_task(pipeline_id, loop.create_task(_wrap()))
 
@@ -300,7 +365,7 @@ class PipelineController(QObject):
             self.runBlocked.emit("Pipeline is already complete.")
             return
         if stage in MANUAL_GATES:
-            self.runBlocked.emit("Pipeline is waiting at a manual gate.")
+            self.runBlocked.emit(self.gate_message(stage))
             return
 
         if not health.rerun_stage:

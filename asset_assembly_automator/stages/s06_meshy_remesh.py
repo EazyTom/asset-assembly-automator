@@ -2,24 +2,46 @@ from __future__ import annotations
 
 import asyncio
 
+from asset_assembly_automator.clients.meshy_client import describe_task_failure
 from asset_assembly_automator.core.config import get_settings
 from asset_assembly_automator.core.db.models import StageResult
-from asset_assembly_automator.core.state_machine import StageId
+from asset_assembly_automator.core.state_machine import StageId, asset_kind_for_pipeline
 from asset_assembly_automator.stages._base import (
     get_meshy_client,
+    job_metadata,
+    mesh_source_for_pipeline,
     meshy_face_count,
+    record_meshy_result,
     remesh_target_for_pipeline,
     resolve_meshy_job,
+    reusable_meshy_job,
+    run_meshy_task,
     run_stage,
     stage_argparser,
 )
 
 
+def _skip(db, ctx, pipe, *, message: str, next_stage: str, **data) -> StageResult:
+    # Drop a remesh from an earlier run so rig/download use the current mesh source.
+    pipe.metadata.pop("remesh_task_id", None)
+    db.update_pipeline_stage(
+        ctx.pipeline_id,
+        StageId.MESHY_REMESH.value,
+        metadata=pipe.metadata,
+        remove_metadata_keys=("remesh_task_id",),
+    )
+    return StageResult(
+        success=True,
+        stage=StageId.MESHY_REMESH.value,
+        message=message,
+        next_stage=next_stage,
+        data={"skipped": True, **data},
+    )
+
+
 async def _run(ctx, db, dirs, writer):
     settings = get_settings()
     pipe = db.get_pipeline(ctx.pipeline_id)
-    from asset_assembly_automator.core.state_machine import asset_kind_for_pipeline
-
     kind = asset_kind_for_pipeline(pipe)
     next_after_remesh = (
         StageId.MESHY_RIG.value if kind == "character" else StageId.MESHY_DOWNLOAD.value
@@ -32,15 +54,13 @@ async def _run(ctx, db, dirs, writer):
             skipped=True,
             reason="remesh_disabled",
         )
-        next_after_remesh = (
-            StageId.MESHY_RIG.value if kind == "character" else StageId.MESHY_DOWNLOAD.value
-        )
-        return StageResult(
-            success=True,
-            stage=StageId.MESHY_REMESH.value,
+        return _skip(
+            db,
+            ctx,
+            pipe,
             message="Remesh skipped (disabled)",
             next_stage=next_after_remesh,
-            data={"skipped": True, "reason": "remesh_disabled"},
+            reason="remesh_disabled",
         )
 
     if pipe.metadata.get("meshy_preset") == "game_ready":
@@ -50,75 +70,63 @@ async def _run(ctx, db, dirs, writer):
             skipped=True,
             reason="smart_topology",
         )
-        next_after_remesh = (
-            StageId.MESHY_RIG.value if kind == "character" else StageId.MESHY_DOWNLOAD.value
-        )
-        return StageResult(
-            success=True,
-            stage=StageId.MESHY_REMESH.value,
+        return _skip(
+            db,
+            ctx,
+            pipe,
             message="Remesh skipped — smart-topology preset",
             next_stage=next_after_remesh,
-            data={"skipped": True, "reason": "smart_topology"},
+            reason="smart_topology",
         )
 
-    i2d_job = db.get_external_job(ctx.pipeline_id, "image-to-3d", active_only=False)
-    if not i2d_job:
+    source = mesh_source_for_pipeline(db, pipe)
+    if not source:
         return StageResult(success=False, stage=StageId.MESHY_REMESH.value, error="No i2d job")
+    source_id, source_type = source["task_id"], source["task_type"]
 
     target = remesh_target_for_pipeline(pipe)
     client = get_meshy_client(ctx.dry_run)
     try:
-        i2d_result = await resolve_meshy_job(
+        source_result = await resolve_meshy_job(
             client,
-            i2d_job["task_id"],
-            "image-to-3d",
+            source_id,
+            source_type,
             cancel_event=ctx.cancel_event,
             writer=writer,
         )
-        i2d_status = i2d_result.get("status", "FAILED")
-        source_face_count = meshy_face_count(i2d_result) or pipe.metadata.get("face_count") or 0
-        db.update_external_job(
-            i2d_job["id"],
-            status=i2d_status,
-            face_count=source_face_count or None,
+        source_status = source_result.get("status", "FAILED")
+        source_job = next(
+            (
+                j
+                for j in db.list_external_jobs(ctx.pipeline_id, [source_type])
+                if j["task_id"] == source_id
+            ),
+            None,
         )
-        if i2d_status != "SUCCEEDED":
+        source_face_count = (
+            meshy_face_count(source_result)
+            or (source_job or {}).get("face_count")
+            or pipe.metadata.get("face_count")
+            or 0
+        )
+        if source_job:
+            record_meshy_result(
+                db, source_job["id"], source_result, face_count=source_face_count or None
+            )
+        if source_status != "SUCCEEDED":
             return StageResult(
                 success=False,
                 stage=StageId.MESHY_REMESH.value,
                 error=(
-                    f"Image-to-3D must finish before remesh (status={i2d_status}). "
-                    "Wait for Meshy to finish, then run again."
+                    f"{source_type} {source_id} must finish before remesh "
+                    f"(status={source_status}). Wait for Meshy to finish, then run again."
                 ),
-                data={"i2d_task_id": i2d_job["task_id"], "i2d_status": i2d_status},
+                data={"source_task_id": source_id, "source_status": source_status},
             )
-        pipe.metadata["i2d_task_id"] = i2d_job["task_id"]
+        if source_type == "image-to-3d":
+            pipe.metadata["i2d_task_id"] = source_id
         if source_face_count:
             pipe.metadata["face_count"] = source_face_count
-
-        if pipe.metadata.get("i2d_model_type") == "lowpoly":
-            writer.log(
-                "info",
-                "Skipping remesh — i2d used lowpoly/smart topology model_type",
-                i2d_task_id=i2d_job["task_id"],
-            )
-            db.update_pipeline_stage(
-                ctx.pipeline_id, StageId.MESHY_REMESH.value, metadata=pipe.metadata
-            )
-            next_after_remesh = (
-                StageId.MESHY_RIG.value if kind == "character" else StageId.MESHY_DOWNLOAD.value
-            )
-            return StageResult(
-                success=True,
-                stage=StageId.MESHY_REMESH.value,
-                message="Remesh skipped — i2d lowpoly output already game-ready",
-                next_stage=next_after_remesh,
-                data={
-                    "skipped": True,
-                    "reason": "lowpoly_i2d",
-                    "i2d_task_id": i2d_job["task_id"],
-                },
-            )
 
         writer.log(
             "info",
@@ -128,7 +136,8 @@ async def _run(ctx, db, dirs, writer):
             target_polycount=target,
             topology=settings.meshy.topology,
             target_formats=settings.meshy.target_formats,
-            i2d_task_id=i2d_job["task_id"],
+            source_task_id=source_id,
+            source_task_type=source_type,
         )
 
         if source_face_count and source_face_count <= target:
@@ -138,86 +147,77 @@ async def _run(ctx, db, dirs, writer):
                 source_face_count=source_face_count,
                 target_polycount=target,
             )
-            db.update_pipeline_stage(
-                ctx.pipeline_id, StageId.MESHY_REMESH.value, metadata=pipe.metadata
-            )
-            return StageResult(
-                success=True,
-                stage=StageId.MESHY_REMESH.value,
+            return _skip(
+                db,
+                ctx,
+                pipe,
                 message=(
                     f"Remesh skipped — source {source_face_count:,} tris "
                     f"already at or below target {target:,}"
                 ),
                 next_stage=next_after_remesh,
-                data={
-                    "skipped": True,
-                    "source_face_count": source_face_count,
-                    "target_polycount": target,
-                    "i2d_task_id": i2d_job["task_id"],
-                },
+                source_face_count=source_face_count,
+                target_polycount=target,
+                source_task_id=source_id,
             )
 
-        if not ctx.force_new:
-            existing = db.get_external_job(ctx.pipeline_id, "remesh")
-            if existing:
-                task_id = existing["task_id"]
-                writer.log("info", "Reusing existing remesh job", task_id=task_id)
-                result = await resolve_meshy_job(
-                    client,
-                    task_id,
-                    "remesh",
-                    cancel_event=ctx.cancel_event,
-                    writer=writer,
-                )
-                status = result.get("status", "FAILED")
-                db.update_external_job(
-                    existing["id"],
-                    status=status,
-                    face_count=target,
-                )
-                if status != "SUCCEEDED":
-                    return StageResult(
-                        success=False,
-                        stage=StageId.MESHY_REMESH.value,
-                        error=f"Remesh job failed: {status}",
-                    )
-                pipe.metadata["remesh_task_id"] = task_id
-                pipe.metadata["face_count"] = target
-                db.update_pipeline_stage(
-                    ctx.pipeline_id, StageId.MESHY_REMESH.value, metadata=pipe.metadata
-                )
-                return StageResult(
-                    success=True,
-                    stage=StageId.MESHY_REMESH.value,
-                    message=f"Remeshed to {target} tris",
-                    next_stage=next_after_remesh,
-                    data={"task_id": task_id, "target_polycount": target},
-                )
+        existing = reusable_meshy_job(db, ctx.pipeline_id, "remesh", force_new=ctx.force_new)
+        if existing:
+            existing_input = job_metadata(existing).get("input_task_id")
+            # Legacy rows have no input recorded; they were always remeshes of the i2d mesh.
+            if existing_input != source_id and not (
+                existing_input is None and source_type == "image-to-3d"
+            ):
+                existing = None
+        if existing:
+            task_id = existing["task_id"]
+            writer.log("info", "Reusing existing remesh job", task_id=task_id)
+            result = await resolve_meshy_job(
+                client,
+                task_id,
+                "remesh",
+                cancel_event=ctx.cancel_event,
+                writer=writer,
+                db=db,
+                job_id=existing["id"],
+            )
+            record_meshy_result(db, existing["id"], result, face_count=target)
+        else:
+            result = await run_meshy_task(
+                client,
+                db,
+                ctx,
+                writer,
+                task_type="remesh",
+                metadata={"input_task_id": source_id, "input_task_type": source_type},
+                create=lambda: client.remesh(
+                    source_id,
+                    target_polycount=target,
+                    topology=settings.meshy.topology,
+                    target_formats=settings.meshy.target_formats,
+                ),
+            )
+            task_id = result["task_id"]
+            db.update_external_job(result["job_id"], face_count=target)
 
-        created = await client.remesh(
-            i2d_job["task_id"],
-            target_polycount=target,
-            topology=settings.meshy.topology,
-            target_formats=settings.meshy.target_formats,
-        )
-        task_id = created["task_id"]
-        job_id = db.save_external_job(ctx.pipeline_id, "meshy", task_id, "remesh")
-        writer.log("info", "Remesh job created", task_id=task_id, target_polycount=target)
-        result = await client.poll_until_done(task_id, "remesh", cancel_event=ctx.cancel_event)
-        status = result.get("status", "FAILED")
-        db.update_external_job(job_id, status=status, face_count=target)
+        if result.get("status") != "SUCCEEDED":
+            return StageResult(
+                success=False,
+                stage=StageId.MESHY_REMESH.value,
+                error=f"Remesh {describe_task_failure(result)}",
+                data={"task_id": task_id},
+            )
         pipe.metadata["remesh_task_id"] = task_id
         pipe.metadata["face_count"] = target
         db.update_pipeline_stage(
             ctx.pipeline_id, StageId.MESHY_REMESH.value, metadata=pipe.metadata
         )
         return StageResult(
-            success=status == "SUCCEEDED",
+            success=True,
             stage=StageId.MESHY_REMESH.value,
             message=f"Remeshed to {target} tris",
             next_stage=next_after_remesh,
-            data={"task_id": task_id, "target_polycount": target},
-            error=None if status == "SUCCEEDED" else f"Remesh failed: {status}",
+            data={"task_id": task_id, "target_polycount": target, "source_task_id": source_id},
         )
     finally:
         if hasattr(client, "close"):
