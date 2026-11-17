@@ -286,6 +286,23 @@ def test_i2d_geometry_resolution():
     assert multi["geometry_resolution"] == "2k"
 
 
+def test_8k_texture_switches_quad_topology_to_triangle():
+    build = MeshyClient._build_i2d_payload
+    eight_k = build(
+        {"topology": "quad", "texture_resolution": "8k"},
+        image_url="data:a",
+        api_version="v2",
+    )
+    assert eight_k["topology"] == "triangle"
+    assert eight_k["texture_resolution"] == "8k"
+    four_k = build(
+        {"topology": "quad", "texture_resolution": "4k"},
+        image_url="data:a",
+        api_version="v2",
+    )
+    assert four_k["topology"] == "quad"
+
+
 def test_smart_topology_model_and_polycount_clamp():
     build = MeshyClient._build_i2d_payload
     cfg = {"model_type": "smart-topology", "target_polycount": 50000}

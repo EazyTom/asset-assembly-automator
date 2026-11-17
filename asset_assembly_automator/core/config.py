@@ -25,9 +25,10 @@ def _expand_config_paths(data: dict[str, Any]) -> dict[str, Any]:
 
 
 class RemeshTargetTris(BaseSettings):
-    hero: int = 300000
-    npc: int = 300000
-    crowd: int = 300000
+    # Quad faces count as two triangles. 150k quads stay under the 380k rig limit.
+    hero: int = 150000
+    npc: int = 150000
+    crowd: int = 150000
 
 
 class I2dTargetPolycount(BaseSettings):
@@ -97,7 +98,7 @@ class MeshySettings(BaseSettings):
     image_enhancement: bool = True
     remove_lighting: bool = True
     rig_height_meters: float = 1.7
-    hard_rig_face_limit: int = 300000
+    hard_rig_face_limit: int = 380000
     i2d_target_polycount: I2dTargetPolycount = Field(default_factory=I2dTargetPolycount)
     remesh_target_tris: RemeshTargetTris = Field(default_factory=RemeshTargetTris)
     animation_fps: int = 30

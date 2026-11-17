@@ -47,7 +47,9 @@ async def _run(ctx, db, dirs, writer):
         StageId.MESHY_RIG.value if kind == "character" else StageId.MESHY_DOWNLOAD.value
     )
 
-    if not pipe.metadata.get("remesh_enabled", False):
+    # should_remesh in config turns this stage on. remesh_enabled opts one pipeline in.
+    # The image-to-3D request still sends should_remesh false; remesh is its own task.
+    if not (pipe.metadata.get("remesh_enabled") or settings.meshy.should_remesh):
         writer.log(
             "info",
             "Remesh skipped — disabled for pipeline",

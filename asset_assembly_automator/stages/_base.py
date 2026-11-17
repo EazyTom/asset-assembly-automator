@@ -149,11 +149,19 @@ def meshy_settings_for_pipeline(pipe: Pipeline) -> dict[str, Any]:
     return cfg
 
 
+# Meshy rigging allows 380,000 triangles. Its remesh guidance is 300,000 triangles
+# or 150,000 quads, because a quad face counts as two triangles.
+_TRIANGLE_REMESH_CAP = 300_000
+_QUAD_REMESH_CAP = 150_000
+
+
 def remesh_target_for_pipeline(pipe: Pipeline) -> int:
-    """Target polygon count for remesh stage from pipeline poly budget."""
+    """Target polygon count for remesh, capped so the result can be rigged."""
     settings = get_settings()
     budget_map = settings.meshy.remesh_target_tris.model_dump()
-    return int(budget_map.get(pipe.poly_budget, budget_map["hero"]))
+    target = int(budget_map.get(pipe.poly_budget, budget_map["hero"]))
+    cap = _QUAD_REMESH_CAP if settings.meshy.topology == "quad" else _TRIANGLE_REMESH_CAP
+    return min(target, cap)
 
 
 def _mark_canceled_job(db: Database | None, job_id: int | None, exc: MeshyTaskCanceled) -> None:

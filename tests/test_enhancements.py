@@ -29,6 +29,7 @@ def test_meshy_quality_payload():
     )
     assert payload["ai_model"] == "meshy-7"
     assert payload["texture_resolution"] == "8k"
+    assert payload["topology"] == "triangle"
     assert "hd_texture" not in payload
     assert payload["should_remesh"] is False
     assert "remove_lighting" not in payload

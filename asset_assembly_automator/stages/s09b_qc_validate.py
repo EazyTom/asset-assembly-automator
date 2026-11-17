@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from asset_assembly_automator.core.config import get_settings
 from asset_assembly_automator.core.db.models import StageResult
 from asset_assembly_automator.core.state_machine import StageId, asset_kind_for_pipeline
 from asset_assembly_automator.stages._base import run_stage, stage_argparser
@@ -39,7 +40,8 @@ async def _run(ctx, db, dirs, writer):
 
     if asset_kind == "character":
         face_count = pipe.metadata.get("face_count")
-        if face_count and face_count > 300000:
+        rig_limit = get_settings().meshy.hard_rig_face_limit
+        if face_count and face_count > rig_limit:
             issues.append(f"Face count {face_count} exceeds hard rig limit")
         for field in ("i2d_task_id", "rig_task_id"):
             if not pipe.metadata.get(field):

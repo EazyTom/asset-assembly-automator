@@ -200,10 +200,10 @@ meshy:
     npc: 300000
     crowd: 300000
   remesh_target_tris:
-    hero: 300000
-    npc: 300000
-    crowd: 300000
-  hard_rig_face_limit: 300000
+    hero: 150000
+    npc: 150000
+    crowd: 150000
+  hard_rig_face_limit: 380000
   animation_fps: 30
 ```
 

@@ -11,7 +11,7 @@ meshy:
   base_url: "https://api.meshy.ai"
   # v1 until a real image-to-3D and retexture are compared by hand. v2 is implemented.
   # Process override: AAA_MESHY__API_VERSION=v2
-  api_version: v1
+  api_version: v2
   # meshy-7.1 is what "latest" resolves to today; pinned so results stay reproducible.
   ai_model: meshy-7.1
   # Sent as texture_model on v2 image-to-3D when should_texture is true.
@@ -45,27 +45,32 @@ meshy:
   transient_task_retries: 1
   i2d_target_formats: [fbx, glb]
   pose_mode: t-pose
+  # Remesh uses quad. Image-to-3D at 8k sends triangle; Meshy rejects quad with 8k.
   topology: quad
   enable_pbr: true
   should_texture: true
   hd_texture: true
-  should_remesh: false
+  # Turns on the remesh stage before rig. The image-to-3D call still sends
+  # should_remesh false; remesh is a separate Meshy task.
+  should_remesh: true
   target_polycount: 300000
   target_formats: [fbx]
   image_enhancement: true
   remove_lighting: true
   rig_height_meters: 1.7
-  hard_rig_face_limit: 300000
-  # Meshy API max polycount is 300,000 (premium tier). Remesh targets match i2d so we
-  # preserve full detail instead of decimating to game LODs unless you lower these in user config.
+  # Rigging rejects meshes over 380,000 triangles.
+  hard_rig_face_limit: 380000
+  # Meshy API max polycount is 300,000. Image-to-3D can ask for that.
   i2d_target_polycount:
     hero: 300000
     npc: 300000
     crowd: 300000
+  # Quad remesh must stay at or below 150,000 or the rig call is rejected
+  # (one quad counts as two triangles). Triangle remesh can use 300,000.
   remesh_target_tris:
-    hero: 300000
-    npc: 300000
-    crowd: 300000
+    hero: 150000
+    npc: 150000
+    crowd: 150000
   animation_fps: 30
   # Walk/run are free with rig — always downloaded into Source/ with the rig FBX
   include_basic_animations_in_package: true

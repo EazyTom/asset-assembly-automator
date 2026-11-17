@@ -96,16 +96,16 @@ def test_runnable_stage_from_draft():
 
 def test_remesh_poly_budget_targets():
     settings = get_settings()
-    assert settings.meshy.remesh_target_tris.hero == 300000
-    assert settings.meshy.remesh_target_tris.npc == 300000
-    assert settings.meshy.remesh_target_tris.crowd == 300000
+    assert settings.meshy.remesh_target_tris.hero == 150000
+    assert settings.meshy.remesh_target_tris.npc == 150000
+    assert settings.meshy.remesh_target_tris.crowd == 150000
     assert settings.meshy.i2d_target_polycount.hero == 300000
     assert settings.meshy.i2d_target_polycount.npc == 300000
     assert settings.meshy.hd_texture is True
     assert settings.meshy.smart_topology == "auto"
     assert settings.meshy.i2d_target_formats == ["fbx", "glb"]
     assert settings.meshy.model_type == "standard"
-    assert settings.meshy.hard_rig_face_limit == 300000
+    assert settings.meshy.hard_rig_face_limit == 380000
 
 
 def test_meshy_settings_for_pipeline_hero(db):
@@ -160,7 +160,7 @@ def test_remesh_target_for_pipeline_hero(db):
     database.update_pipeline_poly_budget(pipeline_id, "hero")
     pipe = database.get_pipeline(pipeline_id)
     assert pipe is not None
-    assert remesh_target_for_pipeline(pipe) == 300000
+    assert remesh_target_for_pipeline(pipe) == 150000
 
 
 @pytest.mark.asyncio

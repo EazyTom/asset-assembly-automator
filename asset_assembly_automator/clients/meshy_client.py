@@ -550,7 +550,11 @@ class MeshyClient(MeshProvider, RigProvider):
                 100, min(int(cfg.get("target_polycount", 4000)), max_polys)
             )
         else:
-            payload["topology"] = cfg.get("topology", "quad")
+            # Meshy rejects texture_resolution 8k together with topology quad.
+            topology = cfg.get("topology", "quad")
+            if str(cfg.get("texture_resolution") or "").lower() == "8k" and topology == "quad":
+                topology = "triangle"
+            payload["topology"] = topology
             payload["target_polycount"] = cfg.get("target_polycount", 300000)
             texture_resolution = cfg.get("texture_resolution")
             if texture_resolution:

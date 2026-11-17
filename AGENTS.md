@@ -53,7 +53,7 @@ Every stage should:
 | **Meshy (AAA Character)** | Single merged animated FBX — package rig + per-clip FBXs + textures |
 | **Meshy (AAA Vehicle / AAA Aircraft)** | Rig or animation clips exist — package the i2d (or remeshed) FBX + textures only |
 | **Meshy rig** | Walk/run are free in `basic_animations`; custom clips cost 3 credits each |
-| **Meshy remesh** | Skipped when i2d face count is already within budget; otherwise remesh to configured target (default max 300k) before rig |
+| **Meshy remesh** | Skipped when i2d face count is already within budget; otherwise remesh to the configured target before rig. Quad targets stay at or below 150k so the mesh stays under the 380k triangle rig limit |
 | **Meshy mesh source** | Downstream input is always the i2d mesh — use `mesh_source_for_pipeline()`; an approved retexture variant replaces it |
 | **Meshy API** | Default is v1 (`meshy.api_version`). v2 reads `output` and `GET /openapi/v2/tasks/{id}`. Do not send removed v1 fields (`model_type`, `hd_texture`, `ultra_mode`, `remove_lighting`); v2 image-to-3D uses `texture_model`, retexture uses `texture_prompt` / `texture_image_url` and `uv_mode` |
 | **Meshy retexture** | `meshy-7.1` works — Retexture rejects it; use `retexture_ai_model` (meshy-7). On v2 that value is sent as `texture_model` |
